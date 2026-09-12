@@ -3,7 +3,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
-from .models import Delivery
+from .models import Delivery, ImportResult
 
 
 REQUIRED_COLUMNS = {
@@ -43,12 +43,8 @@ def _longitude(value: Any) -> float | None:
     return number
 
 
-def import_deliveries(path: str | Path) -> tuple[list[Delivery], list[int]]:
-    """Import every row with valid latitude and longitude.
-
-    Returns (eligible deliveries, unresolved spreadsheet row numbers).
-    Source Sequence/Stop values are retained only as metadata.
-    """
+def import_result(path: str | Path) -> ImportResult:
+    """Import an XLSX and return an auditable accounting of every data row."""
     workbook = load_workbook(filename=path, read_only=True, data_only=True)
     try:
         sheet = workbook.active
@@ -56,7 +52,7 @@ def import_deliveries(path: str | Path) -> tuple[list[Delivery], list[int]]:
         try:
             header = next(rows)
         except StopIteration:
-            return [], []
+            return ImportResult((), (), 0)
 
         columns = {_text(value): index for index, value in enumerate(header) if _text(value)}
         missing = REQUIRED_COLUMNS - columns.keys()
@@ -69,8 +65,10 @@ def import_deliveries(path: str | Path) -> tuple[list[Delivery], list[int]]:
 
         deliveries: list[Delivery] = []
         unresolved: list[int] = []
+        data_rows_seen = 0
 
         for row_number, row in enumerate(rows, start=2):
+            data_rows_seen += 1
             latitude = _coordinate(get(row, "Latitude"))
             longitude = _longitude(get(row, "Longitude"))
             if latitude is None or longitude is None:
@@ -93,6 +91,12 @@ def import_deliveries(path: str | Path) -> tuple[list[Delivery], list[int]]:
                 )
             )
 
-        return deliveries, unresolved
+        return ImportResult(tuple(deliveries), tuple(unresolved), data_rows_seen)
     finally:
         workbook.close()
+
+
+def import_deliveries(path: str | Path) -> tuple[list[Delivery], list[int]]:
+    """Backward-compatible import API returning deliveries and unresolved rows."""
+    result = import_result(path)
+    return list(result.deliveries), list(result.unresolved_rows)

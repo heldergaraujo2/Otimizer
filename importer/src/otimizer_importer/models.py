@@ -91,3 +91,37 @@ class Route:
     @property
     def delivery_count(self) -> int:
         return sum(stop.delivery_count for stop in self.stops)
+
+
+@dataclass(frozen=True)
+class ImportResult:
+    """Auditable outcome of an XLSX import."""
+
+    deliveries: tuple[Delivery, ...]
+    unresolved_rows: tuple[int, ...]
+    data_rows_seen: int
+
+    @property
+    def eligible_delivery_count(self) -> int:
+        return len(self.deliveries)
+
+    @property
+    def unresolved_count(self) -> int:
+        return len(self.unresolved_rows)
+
+    @property
+    def accounted_rows(self) -> int:
+        return self.eligible_delivery_count + self.unresolved_count
+
+    def __post_init__(self) -> None:
+        if self.data_rows_seen < 0:
+            raise ValueError("data_rows_seen cannot be negative")
+        if self.accounted_rows != self.data_rows_seen:
+            raise ValueError("ImportResult must account for every data row")
+        rows = [delivery.row_number for delivery in self.deliveries]
+        if len(rows) != len(set(rows)):
+            raise ValueError("A spreadsheet row cannot produce multiple deliveries")
+        if len(self.unresolved_rows) != len(set(self.unresolved_rows)):
+            raise ValueError("Unresolved spreadsheet rows must be unique")
+        if set(rows) & set(self.unresolved_rows):
+            raise ValueError("A spreadsheet row cannot be both eligible and unresolved")

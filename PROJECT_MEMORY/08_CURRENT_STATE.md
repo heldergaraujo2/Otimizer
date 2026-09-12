@@ -18,11 +18,13 @@ Fundação do domínio e importador.
 - Importador XLSX com elegibilidade por latitude/longitude.
 - Reconstrução inicial de PhysicalStop independente de `Sequence`/`Stop`.
 - Modelo explícito de `OptimizedRouteStop` e `Route` com invariantes de cobertura estrutural.
+- Resultado estruturado de importação com auditoria de todas as linhas de dados.
+- Testes de integridade do resultado da importação.
 - Testes de agrupamento e integridade de deliveries.
 
 ## Próxima etapa
 
-Evoluir a validação/auditoria da importação com resultados estruturados e fixtures de regressão anonimizados; em seguida iniciar a primeira camada de roteamento por rede viária.
+Criar fixtures anonimizados de regressão baseados nos casos reais e validar quantitativamente o pipeline de importação/agrupamento; em seguida iniciar a primeira camada de roteamento por rede viária.
 
 ## Regra de continuidade
 
