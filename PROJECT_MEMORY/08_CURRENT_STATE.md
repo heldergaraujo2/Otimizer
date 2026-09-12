@@ -6,7 +6,7 @@ A integração de escrita com o repositório GitHub `heldergaraujo2/Otimizer` es
 
 ## Fase
 
-Fundação e especificação.
+Fundação do domínio e importador.
 
 ## Concluído
 
@@ -14,13 +14,15 @@ Fundação e especificação.
 - Requisitos funcionais.
 - Arquitetura inicial.
 - Especificação do XLSX.
-- Identidade do projeto.
-- Visão do produto.
-- Requisitos consolidados.
+- Identidade e visão do projeto.
+- Importador XLSX com elegibilidade por latitude/longitude.
+- Reconstrução inicial de PhysicalStop independente de `Sequence`/`Stop`.
+- Modelo explícito de `OptimizedRouteStop` e `Route` com invariantes de cobertura estrutural.
+- Testes de agrupamento e integridade de deliveries.
 
 ## Próxima etapa
 
-Implementar a camada de domínio e o importador XLSX com testes de invariantes, antes de acoplar o motor de roteamento.
+Evoluir a validação/auditoria da importação com resultados estruturados e fixtures de regressão anonimizados; em seguida iniciar a primeira camada de roteamento por rede viária.
 
 ## Regra de continuidade
 
