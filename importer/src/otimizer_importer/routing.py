@@ -1,7 +1,7 @@
 from dataclasses import dataclass
+import json
 from urllib.parse import quote
 from urllib.request import Request, urlopen
-import json
 
 from .models import PhysicalStop
 
@@ -19,15 +19,12 @@ class RoutingError(RuntimeError):
 
 
 def build_osrm_table_url(stops: list[PhysicalStop], base_url: str = "https://router.project-osrm.org") -> str:
-    """Build an OSRM Table request for the supplied physical stops.
-
-    Coordinates are sent as longitude,latitude pairs, as required by OSRM.
-    The resulting matrix is road-network distance/duration, not straight-line distance.
-    """
+    """Build an OSRM Table request for supplied physical stops."""
     if not stops:
         raise ValueError("At least one physical stop is required")
     coordinates = ";".join(f"{stop.longitude},{stop.latitude}" for stop in stops)
-    return f"{base_url.rstrip('/')}/table/v1/driving/{quote(coordinates, safe=',;.-")}?annotations=distance,duration"
+    encoded = quote(coordinates, safe=",;.-")
+    return f"{base_url.rstrip('/')}/table/v1/driving/{encoded}?annotations=distance%2Cduration"
 
 
 def parse_osrm_table(payload: str | bytes, expected_size: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
@@ -38,7 +35,7 @@ def parse_osrm_table(payload: str | bytes, expected_size: int) -> tuple[tuple[Tr
         raise RoutingError("Invalid routing-provider JSON response") from exc
 
     if data.get("code") != "Ok":
-        raise RoutingError(f"Routing provider returned {data.get('code', 'unknown')}" )
+        raise RoutingError(f"Routing provider returned {data.get('code', 'unknown')}")
 
     distances = data.get("distances")
     durations = data.get("durations")
