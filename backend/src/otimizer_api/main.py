@@ -9,6 +9,7 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
+from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
@@ -140,6 +141,8 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
             )
         except RoutingError as exc:
             raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc
+        except OptimizationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
