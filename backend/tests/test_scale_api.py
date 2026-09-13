@@ -44,7 +44,7 @@ def workbook_bytes(count: int, *, physical_stop_count: int) -> bytes:
             sequence,
             stop,
             f"TN-{index + 1:03d}",
-            f"Endereço anonimizado {index + 1}",
+            f"Endereço anonimizado {group + 1}",
             "Bairro teste",
             "Cidade teste",
             "00000-000",
