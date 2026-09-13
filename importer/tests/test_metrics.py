@@ -35,9 +35,8 @@ def test_route_metrics_follow_optimized_order_against_original_matrix_order():
 def test_route_metrics_can_include_origin_and_destination_legs():
     stops = [make_stop(0), make_stop(1)]
     matrix = (
-        (TravelMetric(0, 0), TravelMetric(1000, 100), TravelMetric(2000, 200)),
-        (TravelMetric(1100, 110), TravelMetric(0, 0), TravelMetric(3000, 300)),
-        (TravelMetric(2100, 210), TravelMetric(3100, 310), TravelMetric(0, 0)),
+        (TravelMetric(0, 0), TravelMetric(1000, 100)),
+        (TravelMetric(1100, 110), TravelMetric(0, 0)),
     )
     route = Route.from_physical_stops(stops)
 
