@@ -35,6 +35,10 @@ class PaymentRepository(Protocol):
     def get(self, payment_id: str) -> PixCharge | None: ...
 
 
+class AtomicPaymentSettlementRepository(Protocol):
+    def settle_confirmed_payment(self, payment_id: str, now: datetime) -> License: ...
+
+
 class InMemoryPaymentRepository:
     def __init__(self) -> None:
         self._charges: dict[str, PixCharge] = {}
@@ -145,9 +149,18 @@ class PaymentService:
         persist the payment as ``CONFIRMED`` before calling this method. The
         sandbox gateway provides the same trusted confirmation for tests.
         ``SETTLED`` makes repeated webhook delivery idempotent.
+
+        The Pix amount is the immutable snapshot captured when the charge was
+        created. A later change to the license's configured price must not
+        retroactively invalidate an already-issued charge.
         """
         if self.license_repository is None:
             raise RuntimeError("license_repository is required for settlement")
+        current = _utc(now)
+        atomic_settlement = getattr(self.repository, "settle_confirmed_payment", None)
+        if atomic_settlement is not None:
+            return atomic_settlement(payment_id, current)
+
         charge = self.repository.get(payment_id)
         if charge is None:
             raise KeyError(payment_id)
@@ -158,11 +171,8 @@ class PaymentService:
             return license_record
         if charge.status != PaymentStatus.CONFIRMED:
             raise ValueError(f"payment is not confirmed: {charge.status.value}")
-        if charge.amount_cents != license_record.price_cents:
-            raise ValueError("payment amount does not match the license price snapshot")
         if license_record.revoked_at is not None:
             raise ValueError("cannot activate a revoked license")
-        current = _utc(now)
         duration = license_record.expires_at - license_record.starts_at
         if duration <= timedelta(0):
             raise ValueError("license duration must be positive")
