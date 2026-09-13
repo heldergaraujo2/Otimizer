@@ -7,6 +7,10 @@ let selectedIndex = -1;
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
 
+function navigationUrl(stop) {
+  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${stop.latitude},${stop.longitude}`)}&travelmode=driving`;
+}
+
 function renderMap(route) {
   if (!route.length || typeof L === "undefined") return;
   if (!map) map = L.map("map");
@@ -35,6 +39,7 @@ function showStop(index) {
     <div class="detail-address"><strong>${escapeHtml(deliveries[0]?.address || "Endereço não informado")}</strong><br>${escapeHtml(deliveries[0]?.neighborhood || "")} ${escapeHtml(deliveries[0]?.city || "")}</div>
     <p><strong>${deliveries.length}</strong> entrega(s) nesta parada</p>
     ${deliveries.map(delivery => `<article class="delivery-card"><strong>${escapeHtml(delivery.tracking_number || "Rastreio não informado")}</strong><span>${escapeHtml(delivery.address || "Endereço não informado")}</span></article>`).join("")}
+    <a class="navigation-button" href="${navigationUrl(stop)}" target="_blank" rel="noopener">Navegar até esta parada</a>
   `;
   $("stop-detail").hidden = false;
   $("next-stop").hidden = index >= currentRoute.length - 1;
