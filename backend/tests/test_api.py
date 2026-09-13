@@ -56,6 +56,22 @@ def test_optimize_returns_frontend_ready_route_result():
     assert len(payload["legs"]) == 1
 
 
+def test_optimize_includes_endpoint_leg_and_all_stop_deliveries():
+    client = TestClient(create_app(FakeRoutingProvider()))
+    response = client.post(
+        "/optimize",
+        files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={"origin_latitude": "-16.69", "origin_longitude": "-49.24", "destination_latitude": "-16.72", "destination_longitude": "-49.27"},
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload["legs"]) == 3
+    assert payload["legs"][0]["from_id"] == "origin"
+    assert payload["legs"][-1]["to_id"] == "destination"
+    assert [delivery["tracking_number"] for delivery in payload["route"][1]["deliveries"]] == ["TN-2", "TN-3"]
+
+
 def test_optimize_rejects_invalid_endpoint_pair():
     client = TestClient(create_app(FakeRoutingProvider()))
     response = client.post(
