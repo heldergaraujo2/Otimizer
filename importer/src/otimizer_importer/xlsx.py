@@ -44,8 +44,15 @@ def _longitude(value: Any) -> float | None:
 
 
 def import_result(path: str | Path) -> ImportResult:
-    """Import an XLSX and return an auditable accounting of every data row."""
-    workbook = load_workbook(filename=path, read_only=True, data_only=True)
+    """Import an XLSX and return an auditable accounting of every data row.
+
+    ``read_only=True`` is intentionally avoided here. Some real-world XLSX
+    exports contain an incorrect worksheet dimension (for example, a range
+    that reports only the first column). In that situation openpyxl's
+    read-only iterator can hide valid cells such as Latitude and Longitude.
+    The uploaded delivery exports demonstrated this exact failure mode.
+    """
+    workbook = load_workbook(filename=path, read_only=False, data_only=True)
     try:
         sheet = workbook.active
         rows = sheet.iter_rows(values_only=True)
