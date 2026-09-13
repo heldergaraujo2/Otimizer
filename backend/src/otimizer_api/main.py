@@ -7,13 +7,20 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
 from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
+from otimizer_api.auth import AuthenticationService
 from otimizer_api.licensing import LicenseAuthorizer
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+class LoginRequest(BaseModel):
+    email: str
+    password: str
 
 
 def _max_upload_bytes() -> int:
@@ -101,6 +108,7 @@ def _serialize(result) -> dict:
 def create_app(
     routing_provider: RoutingProvider | None = None,
     license_authorizer: LicenseAuthorizer | None = None,
+    auth_service: AuthenticationService | None = None,
 ) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
     api.add_middleware(
@@ -108,12 +116,44 @@ def create_app(
         allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type", "X-Otimizer-Account-ID"],
+        allow_headers=["Content-Type", "Authorization", "X-Otimizer-Account-ID"],
     )
 
     @api.get("/health")
     def health() -> dict[str, str]:
         return {"status": "ok"}
+
+    @api.post("/auth/login")
+    def login(payload: LoginRequest) -> dict:
+        if auth_service is None:
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
+        result = auth_service.login(payload.email, payload.password)
+        if result is None:
+            raise HTTPException(status_code=401, detail="Invalid email or password")
+        account, token = result
+        return {
+            "access_token": token,
+            "token_type": "bearer",
+            "account": {"account_id": account.account_id, "email": account.email},
+        }
+
+    @api.get("/auth/me")
+    def me(authorization: Annotated[str | None, Header()] = None) -> dict:
+        if auth_service is None:
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
+        authenticated = auth_service.authenticate_bearer(authorization)
+        if authenticated is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        account = authenticated.account
+        return {"account_id": account.account_id, "email": account.email}
+
+    @api.post("/auth/logout")
+    def logout(authorization: Annotated[str | None, Header()] = None) -> dict[str, bool]:
+        if auth_service is None:
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
+        if not auth_service.logout(authorization):
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return {"logged_out": True}
 
     @api.post("/optimize")
     async def optimize_route(
@@ -124,8 +164,15 @@ def create_app(
         destination_latitude: Annotated[float | None, Form()] = None,
         destination_longitude: Annotated[float | None, Form()] = None,
         return_to_start: Annotated[bool, Form()] = False,
+        authorization: Annotated[str | None, Header()] = None,
         account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None,
     ) -> dict:
+        if auth_service is not None:
+            authenticated = auth_service.authenticate_bearer(authorization)
+            if authenticated is None:
+                raise HTTPException(status_code=401, detail="Authentication is required")
+            account_id = authenticated.account.account_id
+
         if license_authorizer is not None:
             if not account_id or not account_id.strip():
                 raise HTTPException(status_code=401, detail="Authentication is required")
