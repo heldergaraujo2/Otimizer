@@ -106,7 +106,8 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
     monkeypatch.setattr(routing, "urlopen", fake_urlopen)
     matrix = routing.fetch_osrm_table(locations, max_locations=3)
 
-    assert len(requests) == 4
+    assert len(requests) == 9
+    assert all(len(request[2]) <= 3 for request in requests)
     assert len(matrix) == 5
     assert all(len(row) == 5 for row in matrix)
     assert matrix[0][4] == TravelMetric(4000.0, 40.0)
