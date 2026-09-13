@@ -7,11 +7,13 @@ provider/backend webhook, never from the browser.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta, timezone
 from enum import Enum
 from typing import Protocol
 from uuid import uuid4
+
+from .licensing import License
 
 
 class PaymentStatus(str, Enum):
@@ -25,6 +27,7 @@ class PaymentStatus(str, Enum):
 class PixCharge:
     payment_id: str
     account_id: str
+    license_id: str
     amount_cents: int
     expires_at: datetime
     pix_copy_paste: str
@@ -66,9 +69,12 @@ class SandboxPixGateway:
             raise ValueError("expires_in must be positive")
         now = datetime.now(timezone.utc)
         payment_id = str(uuid4())
+        # The gateway does not know the license; PaymentService binds the
+        # resulting charge to the server-selected license before persistence.
         charge = PixCharge(
             payment_id=payment_id,
             account_id=account_id,
+            license_id="",
             amount_cents=amount_cents,
             expires_at=now + expires_in,
             pix_copy_paste=f"otimizer-sandbox-pix:{payment_id}",
@@ -83,9 +89,38 @@ class SandboxPixGateway:
         if charge.status != PaymentStatus.PENDING:
             return charge
         if datetime.now(timezone.utc) >= charge.expires_at:
-            expired = PixCharge(**{**charge.__dict__, "status": PaymentStatus.EXPIRED})
+            expired = replace(charge, status=PaymentStatus.EXPIRED)
             self.repository.save(expired)
             return expired
-        confirmed = PixCharge(**{**charge.__dict__, "status": PaymentStatus.CONFIRMED})
+        confirmed = replace(charge, status=PaymentStatus.CONFIRMED)
         self.repository.save(confirmed)
         return confirmed
+
+
+class PaymentService:
+    """Create charges from server-owned license pricing.
+
+    The browser never supplies the amount. ``License.price_cents`` is read by
+    the backend and copied into the payment record, making the charge amount a
+    historical snapshot even if the license price is changed later.
+    """
+
+    def __init__(self, repository: PaymentRepository, gateway: PixGateway) -> None:
+        self.repository = repository
+        self.gateway = gateway
+
+    def create_license_charge(
+        self,
+        license_record: License,
+        expires_in: timedelta = timedelta(minutes=30),
+    ) -> PixCharge:
+        if license_record.price_cents <= 0:
+            raise ValueError("license price must be positive before creating a Pix charge")
+        charge = self.gateway.create_charge(
+            license_record.account_id,
+            license_record.price_cents,
+            expires_in,
+        )
+        bound = replace(charge, license_id=license_record.license_id)
+        self.repository.save(bound)
+        return bound
