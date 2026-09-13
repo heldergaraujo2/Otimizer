@@ -64,6 +64,9 @@ def optimize_deliveries_file(
 ) -> OptimizationServiceResult:
     """Run the complete XLSX-to-route application workflow."""
     imported = import_result(path)
+    if imported.eligible_delivery_count == 0:
+        raise ValueError("Workbook contains no deliveries with valid latitude and longitude")
+
     physical_stops = tuple(group_physical_stops(list(imported.deliveries)))
     full_matrix = build_route_matrix(
         list(physical_stops),
