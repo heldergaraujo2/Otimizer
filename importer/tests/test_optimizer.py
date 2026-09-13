@@ -1,7 +1,7 @@
 import pytest
 
 from otimizer_importer.models import Delivery, PhysicalStop
-from otimizer_importer.optimizer import OptimizationError, optimize_nearest_neighbor
+from otimizer_importer.optimizer import OptimizationError, OptimizationObjective, optimize_nearest_neighbor
 from otimizer_importer.routing import TravelMetric
 
 
@@ -39,7 +39,7 @@ def test_optimizer_does_not_use_straight_line_or_source_sequence():
         (TravelMetric(100, 500), TravelMetric(800, 50), TravelMetric(0, 0)),
     )
 
-    route = optimize_nearest_neighbor(stops, matrix)
+    route = optimize_nearest_neighbor(stops, matrix, objective=OptimizationObjective.DISTANCE)
 
     assert [item.id for item in route.stops] == ["stop-0", "stop-2", "stop-1"]
 
