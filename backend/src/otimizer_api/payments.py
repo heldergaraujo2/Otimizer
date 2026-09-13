@@ -108,7 +108,7 @@ class SandboxPixGateway:
 
 
 class PaymentService:
-    """Create and settle license payments using server-owned state."""
+    """Create charges and settle trusted provider confirmations."""
 
     def __init__(
         self,
@@ -134,29 +134,35 @@ class PaymentService:
             expires_in,
         )
 
-    def confirm_and_activate(
+    def settle_confirmed_payment(
         self,
         payment_id: str,
         now: datetime | None = None,
     ) -> License:
-        """Settle a confirmed payment and extend its license once."""
+        """Activate a license after trusted payment confirmation.
+
+        A real PSP webhook should first validate its signature and amount, then
+        persist the payment as ``CONFIRMED`` before calling this method. The
+        sandbox gateway provides the same trusted confirmation for tests.
+        ``SETTLED`` makes repeated webhook delivery idempotent.
+        """
         if self.license_repository is None:
-            raise RuntimeError("license_repository is required for activation")
+            raise RuntimeError("license_repository is required for settlement")
         charge = self.repository.get(payment_id)
         if charge is None:
             raise KeyError(payment_id)
-        current = _utc(now)
         license_record = self.license_repository.get_by_id(charge.license_id)
         if license_record is None or license_record.account_id != charge.account_id:
             raise ValueError("payment is not bound to a valid account license")
         if charge.status == PaymentStatus.SETTLED:
             return license_record
-        if charge.status == PaymentStatus.PENDING:
-            charge = self.gateway.confirm_sandbox_charge(payment_id)
         if charge.status != PaymentStatus.CONFIRMED:
             raise ValueError(f"payment is not confirmed: {charge.status.value}")
+        if charge.amount_cents != license_record.price_cents:
+            raise ValueError("payment amount does not match the license price snapshot")
         if license_record.revoked_at is not None:
             raise ValueError("cannot activate a revoked license")
+        current = _utc(now)
         duration = license_record.expires_at - license_record.starts_at
         if duration <= timedelta(0):
             raise ValueError("license duration must be positive")
