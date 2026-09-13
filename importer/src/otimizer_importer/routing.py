@@ -56,7 +56,7 @@ def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url
     if not locations:
         raise ValueError("At least one location is required")
     encoded = quote(_coordinates(locations), safe=",;.-")
-    return f"{base_url.rstrip('/')}/table/v1/driving/{encoded}?annotations=distance%2Cduration"
+    return f"{base_url.rstrip('/')}/table/v1/driving/{encoded}?annotations=distance,duration"
 
 
 def parse_osrm_table(payload: str | bytes, expected_size: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
