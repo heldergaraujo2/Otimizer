@@ -1,10 +1,15 @@
 from dataclasses import dataclass
 import json
+import os
 from typing import Protocol, Sequence
 from urllib.request import Request, urlopen
 
 from .models import PhysicalStop
 from .types import RouteEndpoint
+
+
+DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
+DEFAULT_OSRM_TIMEOUT_SECONDS = 15.0
 
 
 @dataclass(frozen=True)
@@ -27,12 +32,27 @@ class RoutingProvider(Protocol):
     ) -> tuple[tuple[TravelMetric | None, ...], ...]: ...
 
 
+def _configured_osrm_base_url() -> str:
+    return os.getenv("OTIMIZER_OSRM_BASE_URL", DEFAULT_OSRM_BASE_URL).strip() or DEFAULT_OSRM_BASE_URL
+
+
+def _configured_osrm_timeout() -> float:
+    raw = os.getenv("OTIMIZER_OSRM_TIMEOUT_SECONDS")
+    if raw is None:
+        return DEFAULT_OSRM_TIMEOUT_SECONDS
+    try:
+        value = float(raw)
+    except ValueError:
+        return DEFAULT_OSRM_TIMEOUT_SECONDS
+    return value if value > 0 else DEFAULT_OSRM_TIMEOUT_SECONDS
+
+
 class OSRMRoutingProvider:
     """Routing provider backed by the OSRM Table API."""
 
-    def __init__(self, *, timeout_seconds: float = 15.0, base_url: str = "https://router.project-osrm.org") -> None:
-        self.timeout_seconds = timeout_seconds
-        self.base_url = base_url
+    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None) -> None:
+        self.timeout_seconds = _configured_osrm_timeout() if timeout_seconds is None else timeout_seconds
+        self.base_url = _configured_osrm_base_url() if base_url is None else base_url
 
     def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
         return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url)
@@ -42,7 +62,7 @@ def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
     return ";".join(f"{location.longitude},{location.latitude}" for location in locations)
 
 
-def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url: str = "https://router.project-osrm.org") -> str:
+def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url: str = DEFAULT_OSRM_BASE_URL) -> str:
     """Build an OSRM Table request for physical stops and external endpoints."""
     if not locations:
         raise ValueError("At least one location is required")
@@ -82,7 +102,11 @@ def parse_osrm_table(payload: str | bytes, expected_size: int) -> tuple[tuple[Tr
     return tuple(matrix)
 
 
-def fetch_osrm_table(locations: list[PhysicalStop | RouteEndpoint], timeout_seconds: float = 15.0, base_url: str = "https://router.project-osrm.org") -> tuple[tuple[TravelMetric | None, ...], ...]:
+def fetch_osrm_table(
+    locations: list[PhysicalStop | RouteEndpoint],
+    timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS,
+    base_url: str = DEFAULT_OSRM_BASE_URL,
+) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Fetch a road-network matrix from OSRM without hiding unreachable pairs."""
     url = build_osrm_table_url(locations, base_url=base_url)
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "Otimizer/0.1"})
