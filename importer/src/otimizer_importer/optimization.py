@@ -330,9 +330,6 @@ def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
     if not reachable:
         return ()
 
-    # Trying every possible first stop makes a 100-stop route unnecessarily
-    # expensive. Keep the best origin candidates and a few evenly distributed
-    # alternatives, while remaining deterministic and bounded.
     limit = min(12, len(reachable))
     ranked = sorted(
         reachable,
@@ -348,8 +345,28 @@ def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
 def _optimize_order(problem, starts):
     if len(problem.stops) <= 12:
         return _exact_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
-    greedy = _greedy_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
-    return _two_opt(greedy, problem)
+
+    best = None
+    for start in starts:
+        greedy = _greedy_order(
+            problem.stops,
+            problem.matrix,
+            (start,),
+            problem.objective,
+            problem.origin_metrics,
+            problem.destination_metrics,
+            problem.return_to_start,
+        )
+        improved = _two_opt(greedy, problem)
+        cost = _order_cost(improved, problem)
+        if cost is None:
+            continue
+        candidate = (cost, tuple(improved))
+        if best is None or candidate < best:
+            best = candidate
+    if best is None:
+        raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
+    return best[1]
 
 
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
