@@ -2,10 +2,12 @@ from datetime import datetime, timedelta, timezone
 
 from otimizer_api.accounts import Account, Session
 from otimizer_api.licensing import Entitlements, License
+from otimizer_api.payments import PaymentStatus, PixCharge
 from otimizer_api.persistence import (
     SQLiteAccountRepository,
     SQLiteDatabase,
     SQLiteLicenseRepository,
+    SQLitePaymentRepository,
     SQLiteSessionRepository,
 )
 
@@ -103,3 +105,32 @@ def test_license_repository_does_not_return_revoked_or_expired_license(tmp_path)
     )
 
     assert repository.get_active_license("acct-1", now) is None
+
+
+def test_payment_repository_persists_amount_and_status(tmp_path):
+    database = SQLiteDatabase(tmp_path / "otimizer.db")
+    SQLiteAccountRepository(database).save(Account("acct-1", "user@example.com", "hash"))
+    license_record = License(
+        "license-1",
+        "acct-1",
+        datetime(2026, 9, 1, tzinfo=timezone.utc),
+        datetime(2026, 10, 1, tzinfo=timezone.utc),
+        price_cents=2990,
+    )
+    SQLiteLicenseRepository(database).save(license_record)
+    repository = SQLitePaymentRepository(database)
+    charge = PixCharge(
+        payment_id="payment-1",
+        account_id="acct-1",
+        license_id="license-1",
+        amount_cents=2990,
+        expires_at=datetime(2026, 9, 13, 13, tzinfo=timezone.utc),
+        pix_copy_paste="otimizer-sandbox-pix:payment-1",
+    )
+
+    repository.save(charge)
+    assert repository.get("payment-1") == charge
+
+    confirmed = PixCharge(**{**charge.__dict__, "status": PaymentStatus.CONFIRMED})
+    repository.save(confirmed)
+    assert repository.get("payment-1") == confirmed
