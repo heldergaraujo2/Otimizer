@@ -83,12 +83,24 @@ def fetch_osrm_table(locations: list[PhysicalStop | RouteEndpoint], timeout_seco
     return parse_osrm_table(payload, len(locations))
 
 
-def build_route_matrix(stops: list[PhysicalStop], origin: RouteEndpoint | None = None, destination: RouteEndpoint | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Fetch one matrix ordered as optional origin, stops, optional destination."""
+def build_route_matrix(
+    stops: list[PhysicalStop],
+    origin: RouteEndpoint | None = None,
+    destination: RouteEndpoint | None = None,
+    *,
+    provider=None,
+) -> tuple[tuple[TravelMetric | None, ...], ...]:
+    """Build one matrix ordered as optional origin, stops, optional destination.
+
+    ``provider`` can be any object implementing ``RoutingProvider.table``.
+    When omitted, the legacy direct OSRM implementation is used.
+    """
     locations: list[PhysicalStop | RouteEndpoint] = []
     if origin is not None:
         locations.append(origin)
     locations.extend(stops)
     if destination is not None:
         locations.append(destination)
-    return fetch_osrm_table(locations)
+    if provider is None:
+        return fetch_osrm_table(locations)
+    return provider.table(locations)
