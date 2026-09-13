@@ -1,9 +1,4 @@
-"""Goiânia cadastral location provider.
-
-The provider uses the municipality's public ArcGIS FeatureServer as an
-optional source of cadastral evidence. It is intentionally isolated from the
-core location abstractions so other cities can provide their own adapters.
-"""
+"""Goiânia cadastral location provider."""
 
 from __future__ import annotations
 
@@ -20,17 +15,16 @@ DEFAULT_FEATURE_BASE_URL = (
 )
 LOT_LAYER_ID = 0
 OFFICIAL_NUMBER_LAYER_ID = 5
+STREET_SEGMENT_LAYER_ID = 7
 
 
 class GoianiaLocationProvider(LocationDataProvider):
-    """Resolve an XLSX GPS point against Goiânia's public cadastral layers.
+    """Resolve delivery evidence using Goiânia cadastral data.
 
-    The XLSX GPS coordinate is the search anchor. When the spreadsheet has a
-    house number, an exact municipal official-number match is preferred because
-    that point is normally a better frontage/property anchor than a lot
-    centroid. Without a number match, the cadastral lot remains the fallback.
-    Neither result is claimed to be the final vehicle stopping point; that is
-    a separate road-access stage.
+    A municipal official property number is preferred when present. The
+    resolved property point is then projected onto the nearest municipal
+    street segment to create a vehicle-access candidate. This is deliberately
+    a candidate, not a claim that the vehicle can stop at the exact point.
     """
 
     def __init__(self, *, base_url: str = DEFAULT_FEATURE_BASE_URL, timeout_seconds: float = 5.0) -> None:
@@ -45,41 +39,52 @@ class GoianiaLocationProvider(LocationDataProvider):
             official_numbers = self._query_official_numbers(evidence)
             best_number = _best_matching_official_number(evidence, official_numbers)
             if best_number is not None:
-                geometry = best_number.get("geometry") or {}
-                point = _point_from_geometry(geometry)
-                if point is not None:
+                property_point = _point_from_geometry(best_number.get("geometry") or {})
+                if property_point is not None:
                     attributes = best_number.get("attributes") or {}
                     cadastral_id = attributes.get("id")
-                    return ResolvedLocation(
-                        latitude=point[1],
-                        longitude=point[0],
+                    access_point = self._nearest_street_access(evidence, property_point)
+                    if access_point is not None:
+                        return _resolved_with_access(
+                            property_point,
+                            access_point,
+                            confidence=0.96,
+                            source="goiania-official-property-number-road-access",
+                            cadastral_id=cadastral_id,
+                        )
+                    return _resolved_with_access(
+                        property_point,
+                        None,
                         confidence=0.92,
                         source="goiania-official-property-number",
-                        property_latitude=point[1],
-                        property_longitude=point[0],
-                        cadastral_id=str(cadastral_id) if cadastral_id is not None else None,
+                        cadastral_id=cadastral_id,
                     )
 
         features = self._query_lots(evidence)
         if not features:
             return None
-
         best = min(features, key=lambda feature: _distance_sq_to_geometry(evidence, feature.get("geometry") or {}))
-        geometry = best.get("geometry") or {}
-        point = _representative_point(geometry)
-        if point is None:
+        property_point = _representative_point(best.get("geometry") or {})
+        if property_point is None:
             return None
 
         attributes = best.get("attributes") or {}
         cadastral_id = attributes.get("id")
-        return ResolvedLocation(
-            latitude=point[1],
-            longitude=point[0],
+        access_point = self._nearest_street_access(evidence, property_point)
+        if access_point is not None:
+            return _resolved_with_access(
+                property_point,
+                access_point,
+                confidence=0.88,
+                source="goiania-cadastral-lot-road-access",
+                cadastral_id=cadastral_id,
+            )
+        return _resolved_with_access(
+            property_point,
+            None,
             confidence=0.80,
             source="goiania-cadastral-lot",
-            property_latitude=point[1],
-            property_longitude=point[0],
-            cadastral_id=str(cadastral_id) if cadastral_id is not None else None,
+            cadastral_id=cadastral_id,
         )
 
     def _query_lots(self, evidence: LocationEvidence) -> list[dict]:
@@ -88,10 +93,24 @@ class GoianiaLocationProvider(LocationDataProvider):
     def _query_official_numbers(self, evidence: LocationEvidence) -> list[dict]:
         return self._query_layer(evidence, OFFICIAL_NUMBER_LAYER_ID, "id,nm_npo,cd_log,cd_rua,cd_bai,ci")
 
+    def _query_street_segments(self, evidence: LocationEvidence) -> list[dict]:
+        return self._query_layer(evidence, STREET_SEGMENT_LAYER_ID, "id_seg,cd_log,cd_rua")
+
+    def _nearest_street_access(
+        self, evidence: LocationEvidence, property_point: tuple[float, float]
+    ) -> tuple[float, float] | None:
+        segments = self._query_street_segments(evidence)
+        best: tuple[float, tuple[float, float]] | None = None
+        for feature in segments:
+            for path in (feature.get("geometry") or {}).get("paths") or []:
+                for start, end in zip(path, path[1:]):
+                    candidate = _nearest_point_on_segment(property_point, start, end)
+                    distance = (candidate[0] - property_point[0]) ** 2 + (candidate[1] - property_point[1]) ** 2
+                    if best is None or distance < best[0]:
+                        best = (distance, candidate)
+        return best[1] if best is not None else None
+
     def _query_layer(self, evidence: LocationEvidence, layer_id: int, out_fields: str) -> list[dict]:
-        # Small envelope around the GPS pin: useful when the delivery pin is
-        # on the street beside the cadastral polygon. Exact address/lot
-        # matching and vehicle access-point selection remain separate stages.
         delta = 0.0005
         params = {
             "where": "1=1",
@@ -115,8 +134,29 @@ class GoianiaLocationProvider(LocationDataProvider):
         return payload.get("features") or []
 
 
+def _resolved_with_access(
+    property_point: tuple[float, float],
+    access_point: tuple[float, float] | None,
+    *,
+    confidence: float,
+    source: str,
+    cadastral_id: object,
+) -> ResolvedLocation:
+    route_point = access_point or property_point
+    return ResolvedLocation(
+        latitude=route_point[1],
+        longitude=route_point[0],
+        confidence=confidence,
+        source=source,
+        property_latitude=property_point[1],
+        property_longitude=property_point[0],
+        access_latitude=access_point[1] if access_point is not None else None,
+        access_longitude=access_point[0] if access_point is not None else None,
+        cadastral_id=str(cadastral_id) if cadastral_id is not None else None,
+    )
+
+
 def _point_from_geometry(geometry: dict) -> tuple[float, float] | None:
-    """Return an ArcGIS point geometry when the layer exposes one."""
     x = geometry.get("x")
     y = geometry.get("y")
     if isinstance(x, (int, float)) and isinstance(y, (int, float)):
@@ -136,11 +176,10 @@ def _best_matching_official_number(evidence: LocationEvidence, features: list[di
     target = _normalize_number(evidence.number)
     if target is None:
         return None
-    matches: list[dict] = []
+    matches = []
     for feature in features:
         attributes = feature.get("attributes") or {}
-        official_number = _normalize_number(attributes.get("nm_npo"))
-        if official_number == target:
+        if _normalize_number(attributes.get("nm_npo")) == target:
             matches.append(feature)
     if not matches:
         return None
@@ -148,14 +187,11 @@ def _best_matching_official_number(evidence: LocationEvidence, features: list[di
 
 
 def _representative_point(geometry: dict) -> tuple[float, float] | None:
-    """Return a polygon centroid for the first ArcGIS ring."""
     rings = geometry.get("rings")
     if not rings or not rings[0] or len(rings[0]) < 3:
         return None
     points = rings[0]
-    area_twice = 0.0
-    cx = 0.0
-    cy = 0.0
+    area_twice = cx = cy = 0.0
     for current, nxt in zip(points, points[1:] + points[:1]):
         cross = current[0] * nxt[1] - nxt[0] * current[1]
         area_twice += cross
@@ -164,6 +200,21 @@ def _representative_point(geometry: dict) -> tuple[float, float] | None:
     if abs(area_twice) < 1e-12:
         return points[0][0], points[0][1]
     return cx / (3 * area_twice), cy / (3 * area_twice)
+
+
+def _nearest_point_on_segment(
+    point: tuple[float, float], start: list[float], end: list[float]
+) -> tuple[float, float]:
+    px, py = point
+    x1, y1 = float(start[0]), float(start[1])
+    x2, y2 = float(end[0]), float(end[1])
+    dx, dy = x2 - x1, y2 - y1
+    denominator = dx * dx + dy * dy
+    if denominator == 0:
+        return x1, y1
+    t = ((px - x1) * dx + (py - y1) * dy) / denominator
+    t = max(0.0, min(1.0, t))
+    return x1 + t * dx, y1 + t * dy
 
 
 def _distance_sq_to_geometry(evidence: LocationEvidence, geometry: dict) -> float:
