@@ -1,26 +1,10 @@
 from dataclasses import dataclass
-from enum import Enum
 from functools import lru_cache
 
 from .models import PhysicalStop, Route
 from .optimizer import OptimizationError
 from .routing import TravelMetric
-
-
-class OptimizationObjective(str, Enum):
-    """Primary metric used when selecting the route."""
-
-    TIME = "time"
-    DISTANCE = "distance"
-
-
-@dataclass(frozen=True)
-class RouteEndpoint:
-    """A fixed geographic endpoint, such as a depot or final destination."""
-
-    latitude: float
-    longitude: float
-    id: str = "endpoint"
+from .types import OptimizationObjective, RouteEndpoint
 
 
 @dataclass(frozen=True)
@@ -49,12 +33,7 @@ class OptimizationProblem:
         return_to_start: bool = False,
         objective: OptimizationObjective = OptimizationObjective.TIME,
     ) -> "OptimizationProblem":
-        """Create a problem from matrix order: origin, stops, destination.
-
-        This is the preferred API for callers that obtain routing data from
-        ``build_route_matrix``. Endpoints remain outside the physical-stop
-        matrix consumed by the optimizer.
-        """
+        """Create a problem from matrix order: origin, stops, destination."""
         size = len(stops)
         expected = size + (1 if origin is not None else 0) + (1 if destination is not None else 0)
         if len(full_matrix) != expected or any(len(row) != expected for row in full_matrix):
