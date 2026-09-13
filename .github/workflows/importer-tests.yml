@@ -3,7 +3,17 @@ name: Importer tests
 on:
   push:
     branches: [main]
+    paths:
+      - "importer/**"
+      - ".github/workflows/importer-tests.yml"
   pull_request:
+    paths:
+      - "importer/**"
+      - ".github/workflows/importer-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test-importer:
