@@ -99,6 +99,20 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
     assert matrix[2][2] == TravelMetric(0.0, 0.0)
 
 
+def test_fetch_osrm_table_reports_failed_tile_coordinates(monkeypatch):
+    locations = [stop(index, -16.0 - index, -49.0 - index) for index in range(5)]
+
+    def fail_first_tile(tile_locations, **kwargs):
+        if len(tile_locations) == 1 and tile_locations[0].id == "stop-1":
+            raise RoutingError("Routing provider returned NoRoute")
+        size = len(tile_locations)
+        return tuple(tuple(TravelMetric(0.0, 0.0) for _ in range(size)) for _ in range(size))
+
+    monkeypatch.setattr(routing, "_fetch_osrm_request", fail_first_tile)
+    with pytest.raises(RoutingError, match=r"OSRM tile failed .*sources 0:1.*destinations 0:1"):
+        routing.fetch_osrm_table(locations, max_locations=3, max_concurrent_requests=1)
+
+
 def test_build_route_matrix_uses_injected_provider():
     class FakeProvider:
         def __init__(self): self.locations = None
