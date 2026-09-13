@@ -30,7 +30,16 @@ def authorizer_for(*, active=True):
 
 def test_protected_route_requires_account_identity():
     client = TestClient(create_app(FakeRoutingProvider(), authorizer_for()))
-    response = client.post("/optimize")
+    response = client.post(
+        "/optimize",
+        files={
+            "file": (
+                "route.xlsx",
+                b"placeholder",
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            )
+        },
+    )
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication is required"
 
