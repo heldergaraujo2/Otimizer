@@ -50,7 +50,7 @@ def test_osrm_provider_is_configurable():
 
 
 def test_provider_receives_endpoints_and_stops_in_route_matrix_order():
-    matrix = tuple(tuple(TravelMetric(0, 0) for _ in range(4)) for _ in range(4))
+    matrix = tuple(tuple(TravelMetric(0, 0) for _ in range(3)) for _ in range(3))
     provider = FakeRoutingProvider(matrix)
 
     origin = RouteEndpoint(-16.70, -49.20, id="origin")
@@ -59,5 +59,8 @@ def test_provider_receives_endpoints_and_stops_in_route_matrix_order():
 
     result = build_route_matrix(stops, origin, destination, provider=provider)
 
-    assert result == matrix
-    assert [location.id for location in provider.locations] == ["origin", "stop-0", "stop-1", "destination"]
+    assert len(result) == 4
+    assert all(len(row) == 4 for row in result)
+    assert [location.id for location in provider.locations] == ["origin", "stop-1", "destination"]
+    assert result[0][1] == TravelMetric(0, 0)
+    assert result[1][0] == TravelMetric(0, 0)
