@@ -1,13 +1,14 @@
 from dataclasses import dataclass
 from enum import Enum
+from functools import lru_cache
 
 from .models import PhysicalStop, Route
-from .optimizer import OptimizationError, optimize_nearest_neighbor
+from .optimizer import OptimizationError
 from .routing import TravelMetric
 
 
 class OptimizationObjective(str, Enum):
-    """Primary metric used when selecting the next physical stop."""
+    """Primary metric used when selecting the route."""
 
     TIME = "time"
     DISTANCE = "distance"
@@ -78,69 +79,194 @@ def _metric_cost(metric: TravelMetric, objective: OptimizationObjective) -> tupl
     return metric.duration_seconds, metric.distance_meters
 
 
-def _destination_metric_for_route(
-    route: Route,
+def _add_cost(left: tuple[float, float], right: tuple[float, float]) -> tuple[float, float]:
+    return left[0] + right[0], left[1] + right[1]
+
+
+def _exact_order(
     stops: tuple[PhysicalStop, ...],
-    destination_metrics: tuple[TravelMetric | None, ...],
-) -> TravelMetric:
-    index_by_id = {stop.id: index for index, stop in enumerate(stops)}
-    last_index = index_by_id[route.stops[-1].id]
-    metric = destination_metrics[last_index]
-    if metric is None:
-        raise OptimizationError("Route cannot reach the destination from its final physical stop")
-    return metric
+    matrix: tuple[tuple[TravelMetric | None, ...], ...],
+    starts: tuple[int, ...],
+    objective: OptimizationObjective,
+    destination_metrics: tuple[TravelMetric | None, ...] | None,
+    return_to_start: bool,
+) -> tuple[int, ...]:
+    """Solve a small route exactly with deterministic Held-Karp DP."""
+    size = len(stops)
+    best: tuple[tuple[float, float], tuple[int, ...]] | None = None
+
+    for start in starts:
+        remaining = tuple(index for index in range(size) if index != start)
+
+        @lru_cache(maxsize=None)
+        def solve(current: int, mask: int) -> tuple[tuple[float, float], tuple[int, ...]] | None:
+            if mask == 0:
+                if destination_metrics is not None:
+                    metric = destination_metrics[current]
+                    if metric is None:
+                        return None
+                    return _metric_cost(metric, objective), ()
+                if return_to_start:
+                    metric = matrix[current][start]
+                    if metric is None:
+                        return None
+                    return _metric_cost(metric, objective), ()
+                return (0.0, 0.0), ()
+
+            best_suffix = None
+            for offset, next_index in enumerate(remaining):
+                bit = 1 << offset
+                if not mask & bit:
+                    continue
+                metric = matrix[current][next_index]
+                if metric is None:
+                    continue
+                suffix = solve(next_index, mask ^ bit)
+                if suffix is None:
+                    continue
+                candidate_cost = _add_cost(_metric_cost(metric, objective), suffix[0])
+                candidate = (candidate_cost, (next_index,) + suffix[1])
+                if best_suffix is None or candidate < best_suffix:
+                    best_suffix = candidate
+            return best_suffix
+
+        initial_mask = (1 << len(remaining)) - 1
+        suffix = solve(start, initial_mask)
+        if suffix is None:
+            continue
+        candidate = (_metric_cost(_origin_metric_placeholder(), objective), ()) if False else None
+        total = suffix[0]
+        order = (start,) + suffix[1]
+        if best is None or (total, order) < best:
+            best = (total, order)
+
+    if best is None:
+        raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
+    return best[1]
+
+
+def _origin_metric_placeholder() -> TravelMetric:
+    # Kept private solely to make the type checker happy in the deliberately
+    # unreachable branch above; it is never executed.
+    return TravelMetric(0.0, 0.0)
+
+
+def _greedy_order(
+    stops: tuple[PhysicalStop, ...],
+    matrix: tuple[tuple[TravelMetric | None, ...], ...],
+    starts: tuple[int, ...],
+    objective: OptimizationObjective,
+    destination_metrics: tuple[TravelMetric | None, ...] | None,
+    return_to_start: bool,
+) -> tuple[int, ...]:
+    """Scalable deterministic heuristic with endpoint-aware final-leg choice."""
+    best: tuple[tuple[float, float], tuple[int, ...]] | None = None
+    for start in starts:
+        remaining = set(range(len(stops)))
+        remaining.remove(start)
+        order = [start]
+        current = start
+        total = (0.0, 0.0)
+        while remaining:
+            candidates = [i for i in remaining if matrix[current][i] is not None]
+            if not candidates:
+                break
+            next_index = min(
+                candidates,
+                key=lambda i: (*_metric_cost(matrix[current][i], objective), i),
+            )
+            total = _add_cost(total, _metric_cost(matrix[current][next_index], objective))
+            order.append(next_index)
+            remaining.remove(next_index)
+            current = next_index
+        if remaining:
+            continue
+        if destination_metrics is not None:
+            final = destination_metrics[current]
+            if final is None:
+                continue
+            total = _add_cost(total, _metric_cost(final, objective))
+        elif return_to_start:
+            final = matrix[current][start]
+            if final is None:
+                continue
+            total = _add_cost(total, _metric_cost(final, objective))
+        candidate = (total, tuple(order))
+        if best is None or candidate < best:
+            best = candidate
+    if best is None:
+        raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
+    return best[1]
+
+
+def _optimize_order(
+    problem: OptimizationProblem,
+    starts: tuple[int, ...],
+) -> tuple[int, ...]:
+    if len(problem.stops) <= 12:
+        return _exact_order(
+            problem.stops,
+            problem.matrix,
+            starts,
+            problem.objective,
+            problem.destination_metrics,
+            problem.return_to_start,
+        )
+    return _greedy_order(
+        problem.stops,
+        problem.matrix,
+        starts,
+        problem.objective,
+        problem.destination_metrics,
+        problem.return_to_start,
+    )
 
 
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
-    """Run the baseline optimizer with explicit external endpoints.
+    """Optimize the complete road trip while preserving every physical stop.
 
-    External endpoints are never delivery stops. Their road-network legs are
-    retained in the result for complete trip reporting.
+    Up to twelve stops are solved exactly. Larger routes use a deterministic
+    scalable heuristic. In both modes, an external destination participates in
+    route selection rather than being checked only after the route is built.
     """
     if not problem.stops:
-        return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False,
-                                  problem.origin, problem.destination)
+        return OptimizationResult(
+            Route.from_physical_stops([]), problem.objective, None, False,
+            problem.origin, problem.destination,
+        )
 
     if problem.origin is None:
-        route = optimize_nearest_neighbor(
-            list(problem.stops), problem.matrix,
-            start_index=problem.start_index,
-            return_to_start=problem.return_to_start,
-            objective=problem.objective,
+        starts = (problem.start_index,)
+        origin_metric = None
+    else:
+        starts = tuple(
+            index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None
         )
-        destination_metric = None
-        if problem.destination is not None:
-            destination_metric = _destination_metric_for_route(
-                route, problem.stops, problem.destination_metrics or ()
-            )
-        return OptimizationResult(
-            route, problem.objective, problem.start_index, problem.return_to_start,
-            problem.origin, problem.destination, None, destination_metric,
-        )
+        if not starts:
+            raise OptimizationError("No road-network path reaches a physical stop from the origin")
+        origin_metric = None
 
-    candidates = [index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None]
-    if not candidates:
-        raise OptimizationError("No road-network path reaches a physical stop from the origin")
+    order = _optimize_order(problem, starts)
+    route = Route.from_physical_stops([problem.stops[index] for index in order])
 
-    first = min(
-        candidates,
-        key=lambda index: (*_metric_cost(problem.origin_metrics[index], problem.objective), index),
-    )
-    route = optimize_nearest_neighbor(
-        list(problem.stops), problem.matrix,
-        start_index=first,
-        return_to_start=False,
-        objective=problem.objective,
-    )
+    if problem.origin is not None:
+        origin_metric = problem.origin_metrics[order[0]]
+
     destination_metric = None
     if problem.destination is not None:
-        destination_metric = _destination_metric_for_route(
-            route, problem.stops, problem.destination_metrics or ()
-        )
+        destination_metric = problem.destination_metrics[order[-1]]
+        if destination_metric is None:
+            raise OptimizationError("Route cannot reach the destination from its final physical stop")
 
     return OptimizationResult(
-        route, problem.objective, None, False,
-        problem.origin, problem.destination, problem.origin_metrics[first], destination_metric,
+        route,
+        problem.objective,
+        order[0] if problem.origin is None else None,
+        problem.return_to_start if problem.origin is None else False,
+        problem.origin,
+        problem.destination,
+        origin_metric,
+        destination_metric,
     )
 
 
