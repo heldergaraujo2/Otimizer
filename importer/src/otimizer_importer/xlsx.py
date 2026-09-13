@@ -3,6 +3,7 @@ from typing import Any
 
 from openpyxl import load_workbook
 
+from .address_parser import parse_address
 from .models import Delivery, ImportResult
 
 
@@ -64,10 +65,10 @@ def import_result(path: str | Path) -> ImportResult:
     read-only iterator can hide valid cells such as Latitude and Longitude.
     The uploaded delivery exports demonstrated this exact failure mode.
 
-    Quadra and Lote are optional because not every delivery export contains
-    them. When present, they are preserved as location evidence for the
-    physical-stop reconciliation layer; they never replace latitude/longitude
-    or cause a delivery row to be discarded.
+    Address information is enriched conservatively from Destination Address.
+    Quadra/Lote are optional columns, but the parser also extracts them when
+    they are embedded in the free-form address. Original address text remains
+    untouched for later geocoding and cadastral resolution.
     """
     workbook = load_workbook(filename=path, read_only=False, data_only=True)
     try:
@@ -104,6 +105,11 @@ def import_result(path: str | Path) -> ImportResult:
                 unresolved.append(row_number)
                 continue
 
+            address = _text(get(row, "Destination Address"))
+            parsed = parse_address(address)
+            quadra = _text(get(row, quadra_column)) or parsed.quadra
+            lote = _text(get(row, lote_column)) or parsed.lote
+
             deliveries.append(
                 Delivery(
                     row_number=row_number,
@@ -111,14 +117,16 @@ def import_result(path: str | Path) -> ImportResult:
                     source_sequence=_text(get(row, "Sequence")),
                     source_stop=_text(get(row, "Stop")),
                     tracking_number=_text(get(row, "SPX TN")),
-                    address=_text(get(row, "Destination Address")),
+                    address=address,
                     neighborhood=_text(get(row, "Bairro")),
                     city=_text(get(row, "City")),
                     zipcode=_text(get(row, "Zipcode/Postal code")),
                     latitude=latitude,
                     longitude=longitude,
-                    quadra=_text(get(row, quadra_column)),
-                    lote=_text(get(row, lote_column)),
+                    quadra=quadra,
+                    lote=lote,
+                    number=parsed.number,
+                    normalized_address=parsed.normalized,
                 )
             )
 
