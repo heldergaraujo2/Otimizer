@@ -7,6 +7,42 @@ let selectedIndex = -1;
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
 
+function setStatus(message, state = "") {
+  const status = $("status");
+  status.textContent = message;
+  status.className = `status${state ? ` status-${state}` : ""}`;
+}
+
+function showError(message) {
+  $("error").textContent = message;
+  $("error").hidden = false;
+}
+
+function clearError() {
+  $("error").textContent = "";
+  $("error").hidden = true;
+}
+
+function friendlyApiError(response, detail) {
+  if (response.status === 413) return `Arquivo muito grande. ${detail || "Envie um arquivo menor."}`;
+  if (response.status === 422) return `Arquivo ou rota inválida. ${detail || "Verifique os dados e tente novamente."}`;
+  if (response.status === 502) return `Falha no serviço de roteamento. ${detail || "Tente novamente em instantes."}`;
+  return detail || `Falha ao otimizar (HTTP ${response.status}).`;
+}
+
+async function readApiError(response) {
+  const contentType = response.headers.get("content-type") || "";
+  if (contentType.includes("application/json")) {
+    try {
+      const result = await response.json();
+      return typeof result.detail === "string" ? result.detail : "";
+    } catch (_) {
+      return "";
+    }
+  }
+  try { return (await response.text()).trim(); } catch (_) { return ""; }
+}
+
 function navigationUrl(stop) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${stop.latitude},${stop.longitude}`)}&travelmode=driving`;
 }
@@ -62,7 +98,8 @@ $("file-input").addEventListener("change", (event) => {
   const file = event.target.files[0];
   $("file-name").textContent = file ? file.name : "Selecione um arquivo .xlsx";
   $("optimize").disabled = !file;
-  $("error").hidden = true;
+  clearError();
+  setStatus(file ? "Arquivo pronto" : "Pronto");
 });
 
 $("close-detail").addEventListener("click", () => { $("stop-detail").hidden = true; selectedIndex = -1; });
@@ -70,39 +107,60 @@ $("next-stop").addEventListener("click", () => { if (selectedIndex >= 0) showSto
 
 $("optimize").addEventListener("click", async () => {
   const file = $("file-input").files[0];
-  if (!file) return;
+  if (!file || $("optimize").disabled) return;
   const form = new FormData();
   form.append("file", file);
   form.append("objective", $("objective").value);
   form.append("return_to_start", $("return-to-start").value);
   const endpoint = (latId, lonId, latName, lonName) => {
-    const lat=$(latId).value.trim(), lon=$(lonId).value.trim();
+    const lat = $(latId).value.trim(), lon = $(lonId).value.trim();
     if (!lat && !lon) return;
     if (!lat || !lon) throw Error("Preencha latitude e longitude do mesmo ponto.");
     form.append(latName, lat); form.append(lonName, lon);
   };
-  $("optimize").disabled = true; $("status").textContent = "Otimizando…";
+
+  clearError();
+  $("optimize").disabled = true;
+  setStatus("Otimizando…", "loading");
   try {
-    endpoint("origin-lat","origin-lon","origin_latitude","origin_longitude");
-    endpoint("destination-lat","destination-lon","destination_latitude","destination_longitude");
-    if ($("destination-lat").value.trim() && $("return-to-start").value === "true") throw Error("Destino e retorno ao início não podem ser usados juntos.");
+    endpoint("origin-lat", "origin-lon", "origin_latitude", "origin_longitude");
+    endpoint("destination-lat", "destination-lon", "destination_latitude", "destination_longitude");
+    if ($("destination-lat").value.trim() && $("return-to-start").value === "true") {
+      throw Error("Destino e retorno ao início não podem ser usados juntos.");
+    }
+
     const response = await fetch(`${API_BASE}/optimize`, { method: "POST", body: form });
+    if (!response.ok) {
+      const detail = await readApiError(response);
+      throw Error(friendlyApiError(response, detail));
+    }
     const result = await response.json();
-    if (!response.ok) throw new Error(result.detail || "Falha ao otimizar.");
-    currentRoute = result.route || [];
+    if (!Array.isArray(result.route) || !result.summary) throw Error("A API retornou uma resposta de rota inválida.");
+
+    // Commit visual state only after the complete response has been validated.
+    currentRoute = result.route;
     $("result").hidden = false;
     $("delivery-count").textContent = result.summary.routed_deliveries;
     $("stop-count").textContent = result.summary.routed_stops;
     $("distance").textContent = `${(result.summary.distance_meters / 1000).toFixed(1)} km`;
     $("duration").textContent = `${Math.round(result.summary.duration_seconds / 60)} min`;
     $("pending").textContent = `${result.summary.pending} pendência(s)`;
-    $("coverage").textContent = result.summary.coverage_complete ? "✓ Rota completa" : "⚠ Rota incompleta";
+    $("coverage").textContent = result.summary.coverage_complete
+      ? `✓ Rota completa · ${result.summary.routed_deliveries} entrega(s) · ${result.summary.routed_stops} parada(s)`
+      : `⚠ Rota incompleta · ${result.summary.routed_deliveries} entrega(s) · ${result.summary.routed_stops} parada(s)`;
+    $("coverage").classList.toggle("pending", !result.summary.coverage_complete || result.summary.pending > 0);
     renderStops(currentRoute);
     renderMap(currentRoute);
     $("stop-detail").hidden = true;
     selectedIndex = -1;
-    $("status").textContent = "Rota pronta";
+    setStatus("Rota pronta", "success");
   } catch (err) {
-    $("error").textContent = err.message; $("error").hidden = false; $("status").textContent = "Erro";
-  } finally { $("optimize").disabled = false; }
+    const message = err instanceof TypeError
+      ? "Não foi possível conectar à API. Verifique se o backend está em execução."
+      : (err.message || "Não foi possível otimizar a rota.");
+    showError(message);
+    setStatus("Erro", "error");
+  } finally {
+    $("optimize").disabled = !$("file-input").files[0];
+  }
 });
