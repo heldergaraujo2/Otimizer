@@ -14,6 +14,7 @@ from .licensing import License, LicenseRepository
 class PaymentStatus(str, Enum):
     PENDING = "pending"
     CONFIRMED = "confirmed"
+    SETTLED = "settled"
     EXPIRED = "expired"
     FAILED = "failed"
 
@@ -138,42 +139,31 @@ class PaymentService:
         payment_id: str,
         now: datetime | None = None,
     ) -> License:
-        """Confirm a trusted payment and extend its bound license exactly once.
-
-        Repeated confirmations are idempotent because only a pending payment
-        can transition to confirmed and activate the license. Production
-        persistence should perform the payment-status transition and license
-        update in one database transaction.
-        """
+        """Settle a confirmed payment and extend its license once."""
         if self.license_repository is None:
             raise RuntimeError("license_repository is required for activation")
         charge = self.repository.get(payment_id)
         if charge is None:
             raise KeyError(payment_id)
         current = _utc(now)
-
         license_record = self.license_repository.get_by_id(charge.license_id)
         if license_record is None or license_record.account_id != charge.account_id:
             raise ValueError("payment is not bound to a valid account license")
-
+        if charge.status == PaymentStatus.SETTLED:
+            return license_record
         if charge.status == PaymentStatus.PENDING:
             charge = self.gateway.confirm_sandbox_charge(payment_id)
         if charge.status != PaymentStatus.CONFIRMED:
             raise ValueError(f"payment is not confirmed: {charge.status.value}")
-
         if license_record.revoked_at is not None:
             raise ValueError("cannot activate a revoked license")
-
         duration = license_record.expires_at - license_record.starts_at
         if duration <= timedelta(0):
             raise ValueError("license duration must be positive")
         start = max(license_record.expires_at, current)
-        activated = replace(
-            license_record,
-            starts_at=license_record.starts_at if license_record.starts_at <= start else start,
-            expires_at=start + duration,
-        )
+        activated = replace(license_record, expires_at=start + duration)
         self.license_repository.save(activated)
+        self.repository.save(replace(charge, status=PaymentStatus.SETTLED))
         return activated
 
 
