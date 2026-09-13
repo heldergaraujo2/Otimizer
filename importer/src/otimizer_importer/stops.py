@@ -130,7 +130,9 @@ def group_physical_stops(
             )
 
     # Reconcile neighboring GPS points only when explicit location evidence
-    # agrees. Proximity alone never merges two unrelated addresses.
+    # agrees. Proximity alone never merges two unrelated addresses. Check the
+    # candidate against every delivery already in the stop so reconciliation
+    # cannot create a transitive merge between contradictory properties.
     reconciled: list[PhysicalStop] = []
     for stop in stops:
         representative = stop.deliveries[0]
@@ -139,8 +141,16 @@ def group_physical_stops(
                 candidate
                 for candidate in reconciled
                 if _distance_meters(representative, candidate.deliveries[0]) <= address_tolerance_meters
-                and _has_shared_strong_evidence(representative, candidate.deliveries[0])
-                and _property_compatible(representative, candidate.deliveries[0])
+                and all(
+                    _has_shared_strong_evidence(representative, existing)
+                    and _property_compatible(representative, existing)
+                    for existing in candidate.deliveries
+                )
+                and all(
+                    _property_compatible(delivery, existing)
+                    for delivery in stop.deliveries
+                    for existing in candidate.deliveries
+                )
             ),
             None,
         )
