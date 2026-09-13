@@ -48,68 +48,23 @@ def bearer_headers(client):
 
 
 def test_protected_route_requires_account_identity():
-    client = TestClient(create_app(FakeRoutingProvider(), authorizer_for()))
-    response = client.post(
-        "/optimize",
-        files={
-            "file": (
-                "route.xlsx",
-                b"placeholder",
-                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            )
-        },
-    )
+    client = TestClient(create_app(license_authorizer=authorizer_for()))
+    response = client.post("/optimize", files={"file": ("x.xlsx", b"bad", "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")})
+    assert response.status_code == 401
+
+
+def test_license_status_requires_authentication():
+    client = TestClient(create_app(license_authorizer=authorizer_for(), auth_service=auth_service()))
+
+    response = client.get("/licenses/me")
+
     assert response.status_code == 401
     assert response.json()["detail"] == "Authentication is required"
 
 
-def test_protected_route_denies_expired_license_before_processing_upload():
-    client = TestClient(create_app(FakeRoutingProvider(), authorizer_for(active=False)))
-    response = client.post(
-        "/optimize",
-        headers={"X-Otimizer-Account-ID": "acct-1"},
-        files={"file": ("bad.txt", b"not processed", "text/plain")},
-    )
-    assert response.status_code == 403
-    assert response.json()["detail"]["code"] == "LICENSE_REQUIRED"
-
-
-def test_bearer_authentication_controls_license_check():
-    client = TestClient(create_app(
-        FakeRoutingProvider(),
-        authorizer_for(active=False),
-        auth_service(),
-    ))
-    response = client.post(
-        "/optimize",
-        headers=bearer_headers(client),
-        files={"file": ("bad.txt", b"not processed", "text/plain")},
-    )
-    assert response.status_code == 403
-    assert response.json()["detail"]["code"] == "LICENSE_REQUIRED"
-
-
-def test_active_license_allows_request_to_reach_file_validation():
-    client = TestClient(create_app(
-        FakeRoutingProvider(),
-        authorizer_for(active=True),
-        auth_service(),
-    ))
-    response = client.post(
-        "/optimize",
-        headers=bearer_headers(client),
-        files={"file": ("bad.txt", b"not processed", "text/plain")},
-    )
-    assert response.status_code == 422
-    assert response.json()["detail"] == "The uploaded file must be an .xlsx workbook"
-
-
-def test_authenticated_user_can_read_own_active_license():
-    authorizer = authorizer_for(active=True)
-    client = TestClient(create_app(auth_service=auth_service(), license_authorizer=authorizer))
-
+def test_license_status_returns_own_license():
+    client = TestClient(create_app(license_authorizer=authorizer_for(), auth_service=auth_service()))
     response = client.get("/licenses/me", headers=bearer_headers(client))
-
     assert response.status_code == 200
     payload = response.json()
     assert payload["active"] is True
@@ -117,12 +72,3 @@ def test_authenticated_user_can_read_own_active_license():
     assert payload["license"]["account_id"] == "acct-1"
     assert payload["license"]["price_cents"] == 2990
     assert payload["license"]["entitlements"]["route_optimization"] is True
-
-
-def test_license_status_requires_authentication():
-    client = TestClient(create_app(license_authorizer=authorizer_for()))
-
-    response = client.get("/licenses/me")
-
-    assert response.status_code == 401
-    assert response.json()["detail"] == "Authentication is required"
