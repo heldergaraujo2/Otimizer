@@ -27,6 +27,35 @@ def test_route_metrics_follow_optimized_order_against_original_matrix_order():
 
     assert metrics.distance_meters == 7100
     assert metrics.duration_seconds == 710
+    assert [(leg.from_id, leg.to_id) for leg in metrics.legs] == [("stop-0", "stop-2"), ("stop-2", "stop-1")]
+    assert sum(leg.distance_meters for leg in metrics.legs) == metrics.distance_meters
+    assert sum(leg.duration_seconds for leg in metrics.legs) == metrics.duration_seconds
+
+
+def test_route_metrics_can_include_origin_and_destination_legs():
+    stops = [make_stop(0), make_stop(1)]
+    matrix = (
+        (TravelMetric(0, 0), TravelMetric(1000, 100), TravelMetric(2000, 200)),
+        (TravelMetric(1100, 110), TravelMetric(0, 0), TravelMetric(3000, 300)),
+        (TravelMetric(2100, 210), TravelMetric(3100, 310), TravelMetric(0, 0)),
+    )
+    route = Route.from_physical_stops(stops)
+
+    metrics = calculate_route_metrics(
+        route,
+        stops,
+        matrix,
+        origin_id="depot",
+        origin_metric=TravelMetric(700, 70),
+        destination_id="final",
+        destination_metric=TravelMetric(900, 90),
+    )
+
+    assert metrics.distance_meters == 2600
+    assert metrics.duration_seconds == 260
+    assert [(leg.from_id, leg.to_id) for leg in metrics.legs] == [
+        ("depot", "stop-0"), ("stop-0", "stop-1"), ("stop-1", "final")
+    ]
 
 
 def test_route_metrics_can_include_return_leg():
@@ -41,6 +70,7 @@ def test_route_metrics_can_include_return_leg():
 
     assert metrics.distance_meters == 2200
     assert metrics.duration_seconds == 220
+    assert [(leg.from_id, leg.to_id) for leg in metrics.legs] == [("stop-0", "stop-1"), ("stop-1", "stop-0")]
 
 
 def test_route_metrics_rejects_unreachable_leg():
