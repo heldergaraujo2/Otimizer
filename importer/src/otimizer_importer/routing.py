@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
 import json
 import math
@@ -12,12 +13,12 @@ from .types import RouteEndpoint
 DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
 DEFAULT_OSRM_TIMEOUT_SECONDS = 15.0
 DEFAULT_OSRM_MAX_LOCATIONS = 100
+DEFAULT_OSRM_MAX_CONCURRENT_REQUESTS = 4
 
 
 @dataclass(frozen=True)
 class TravelMetric:
     """Road-network travel metric between two locations."""
-
     distance_meters: float
     duration_seconds: float
 
@@ -33,11 +34,7 @@ class RoutingError(RuntimeError):
 
 
 class RoutingProvider(Protocol):
-    """Interface implemented by road-network routing providers."""
-
-    def table(
-        self, locations: Sequence[PhysicalStop | RouteEndpoint]
-    ) -> tuple[tuple[TravelMetric | None, ...], ...]: ...
+    def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]: ...
 
 
 def _configured_osrm_base_url() -> str:
@@ -66,16 +63,27 @@ def _configured_osrm_max_locations() -> int:
     return max(2, value)
 
 
+def _configured_osrm_max_concurrent_requests() -> int:
+    raw = os.getenv("OTIMIZER_OSRM_MAX_CONCURRENT_REQUESTS")
+    if raw is None:
+        return DEFAULT_OSRM_MAX_CONCURRENT_REQUESTS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_OSRM_MAX_CONCURRENT_REQUESTS
+    return max(1, value)
+
+
 class OSRMRoutingProvider:
     """Routing provider backed by the OSRM Table API."""
-
-    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None, max_locations: int | None = None):
+    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None, max_locations: int | None = None, max_concurrent_requests: int | None = None):
         self.timeout_seconds = _configured_osrm_timeout() if timeout_seconds is None else timeout_seconds
         self.base_url = _configured_osrm_base_url() if base_url is None else base_url
         self.max_locations = _configured_osrm_max_locations() if max_locations is None else max(2, max_locations)
+        self.max_concurrent_requests = _configured_osrm_max_concurrent_requests() if max_concurrent_requests is None else max(1, max_concurrent_requests)
 
     def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
-        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url, max_locations=self.max_locations)
+        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url, max_locations=self.max_locations, max_concurrent_requests=self.max_concurrent_requests)
 
 
 def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
@@ -83,7 +91,6 @@ def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
 
 
 def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url: str = DEFAULT_OSRM_BASE_URL, *, sources: Sequence[int] | None = None, destinations: Sequence[int] | None = None) -> str:
-    """Build an OSRM Table request, optionally selecting source/destination rows."""
     if not locations:
         raise ValueError("At least one location is required")
     coordinates = _coordinates(locations)
@@ -96,7 +103,6 @@ def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url
 
 
 def parse_osrm_table(payload: str | bytes, expected_size: int, expected_columns: int | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Parse an OSRM Table response into a road-network matrix."""
     columns = expected_size if expected_columns is None else expected_columns
     try:
         data = json.loads(payload)
@@ -148,38 +154,44 @@ def _chunks(size: int, chunk_size: int) -> list[range]:
     return [range(start, min(start + chunk_size, size)) for start in range(0, size, chunk_size)]
 
 
-def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, timeout_seconds: float, base_url: str, max_locations: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Fill a full matrix using bounded OSRM source/destination tiles."""
+def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, timeout_seconds: float, base_url: str, max_locations: int, max_concurrent_requests: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
+    """Fill a full matrix with bounded, concurrently fetched OSRM tiles."""
     size = len(locations)
     matrix: list[list[TravelMetric | None]] = [[None] * size for _ in range(size)]
     chunk_size = max(1, max_locations // 2)
     chunks = _chunks(size, chunk_size)
-    for source_chunk in chunks:
+
+    def fetch_tile(source_chunk: range, destination_chunk: range):
         source_indices = list(source_chunk)
-        for destination_chunk in chunks:
-            destination_indices = list(destination_chunk)
-            if source_chunk == destination_chunk:
-                tile_locations = [locations[index] for index in source_indices]
-                tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url)
-            else:
-                tile_locations = [locations[index] for index in source_indices] + [locations[index] for index in destination_indices]
-                source_local = list(range(len(source_indices)))
-                destination_local = list(range(len(source_indices), len(tile_locations)))
-                tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url, sources=source_local, destinations=destination_local)
+        destination_indices = list(destination_chunk)
+        if source_chunk == destination_chunk:
+            tile_locations = [locations[index] for index in source_indices]
+            tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url)
+        else:
+            tile_locations = [locations[index] for index in source_indices] + [locations[index] for index in destination_indices]
+            source_local = list(range(len(source_indices)))
+            destination_local = list(range(len(source_indices), len(tile_locations)))
+            tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url, sources=source_local, destinations=destination_local)
+        return source_indices, destination_indices, tile
+
+    with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
+        futures = [executor.submit(fetch_tile, source_chunk, destination_chunk) for source_chunk in chunks for destination_chunk in chunks]
+        for future in as_completed(futures):
+            source_indices, destination_indices, tile = future.result()
             for row_offset, source_index in enumerate(source_indices):
                 for column_offset, destination_index in enumerate(destination_indices):
                     matrix[source_index][destination_index] = tile[row_offset][column_offset]
     return tuple(tuple(row) for row in matrix)
 
 
-def fetch_osrm_table(locations: list[PhysicalStop | RouteEndpoint], timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS, base_url: str = DEFAULT_OSRM_BASE_URL, max_locations: int = DEFAULT_OSRM_MAX_LOCATIONS) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Fetch a complete road-network matrix, batching requests when necessary."""
+def fetch_osrm_table(locations: list[PhysicalStop | RouteEndpoint], timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS, base_url: str = DEFAULT_OSRM_BASE_URL, max_locations: int = DEFAULT_OSRM_MAX_LOCATIONS, max_concurrent_requests: int = DEFAULT_OSRM_MAX_CONCURRENT_REQUESTS) -> tuple[tuple[TravelMetric | None, ...], ...]:
     if not locations:
         raise ValueError("At least one location is required")
     max_locations = max(2, max_locations)
+    max_concurrent_requests = max(1, max_concurrent_requests)
     if len(locations) <= max_locations:
         return _fetch_osrm_request(locations, timeout_seconds=timeout_seconds, base_url=base_url)
-    return _fetch_osrm_tiled_table(locations, timeout_seconds=timeout_seconds, base_url=base_url, max_locations=max_locations)
+    return _fetch_osrm_tiled_table(locations, timeout_seconds=timeout_seconds, base_url=base_url, max_locations=max_locations, max_concurrent_requests=max_concurrent_requests)
 
 
 def _location_key(location: PhysicalStop | RouteEndpoint) -> tuple[float, float]:
@@ -206,10 +218,6 @@ def _expand_matrix(matrix: tuple[tuple[TravelMetric | None, ...], ...], expanded
 
 
 def build_route_matrix(stops: list[PhysicalStop], origin: RouteEndpoint | None = None, destination: RouteEndpoint | None = None, *, provider: RoutingProvider | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Build one matrix ordered as optional origin, stops, optional destination.
-
-    Identical coordinates are queried only once and then expanded back to the original order.
-    """
     locations: list[PhysicalStop | RouteEndpoint] = []
     if origin is not None:
         locations.append(origin)
