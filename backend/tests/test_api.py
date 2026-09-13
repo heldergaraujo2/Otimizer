@@ -21,16 +21,46 @@ class FailingRoutingProvider:
         raise RoutingError("routing service unavailable")
 
 
-def workbook_bytes() -> bytes:
+class InconsistentRoutingProvider:
+    def table(self, locations):
+        size = len(locations)
+        return tuple(
+            tuple(TravelMetric(1000, 60) for _ in range(size - 1))
+            for _ in range(size)
+        )
+
+
+class UnreachableRoutingProvider:
+    def table(self, locations):
+        size = len(locations)
+        return tuple(
+            tuple(None if row != col else TravelMetric(0, 0) for col in range(size))
+            for row in range(size)
+        )
+
+
+def workbook_bytes(rows=None) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(["AT ID", "Sequence", "Stop", "SPX TN", "Destination Address", "Bairro", "City", "Zipcode/Postal code", "Latitude", "Longitude"])
-    sheet.append(["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", -16.70, -49.25])
-    sheet.append(["2", "2", "9", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26])
-    sheet.append(["3", "1", "1", "TN-3", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26])
+    if rows is None:
+        rows = [
+            ["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", -16.70, -49.25],
+            ["2", "2", "9", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26],
+            ["3", "1", "1", "TN-3", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26],
+        ]
+    for row in rows:
+        sheet.append(row)
     output = BytesIO()
     workbook.save(output)
     return output.getvalue()
+
+
+def post_workbook(client, content, provider=None):
+    return client.post(
+        "/optimize",
+        files={"file": ("deliveries.xlsx", content, "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
 
 
 def test_health():
@@ -42,11 +72,7 @@ def test_health():
 
 def test_optimize_returns_frontend_ready_route_result():
     client = TestClient(create_app(FakeRoutingProvider()))
-    response = client.post(
-        "/optimize",
-        files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-        data={"objective": "time"},
-    )
+    response = post_workbook(client, workbook_bytes())
 
     assert response.status_code == 200
     payload = response.json()
@@ -88,12 +114,54 @@ def test_optimize_rejects_invalid_endpoint_pair():
     assert "both latitude and longitude" in response.json()["detail"]
 
 
+def test_optimize_rejects_workbook_without_valid_coordinates():
+    client = TestClient(create_app(FakeRoutingProvider()))
+    response = post_workbook(client, workbook_bytes([
+        ["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", None, -49.25],
+        ["2", "-", "-", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", "invalid", None],
+    ]))
+    assert response.status_code == 422
+    assert "no deliveries with valid latitude and longitude" in response.json()["detail"]
+
+
+def test_optimize_handles_all_deliveries_at_one_physical_stop():
+    client = TestClient(create_app(FakeRoutingProvider()))
+    rows = [
+        [str(index), "-", "-", f"TN-{index}", "Rua Unica", "Centro", "Goiania", "74000-000", -16.70, -49.25]
+        for index in range(1, 38)
+    ]
+    response = post_workbook(client, workbook_bytes(rows))
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["eligible_deliveries"] == 37
+    assert payload["summary"]["routed_deliveries"] == 37
+    assert payload["summary"]["physical_stops"] == 1
+    assert payload["summary"]["routed_stops"] == 1
+    assert payload["summary"]["pending"] == 0
+    assert payload["summary"]["coverage_complete"] is True
+    assert [stop["sequence"] for stop in payload["route"]] == [1]
+    assert payload["route"][0]["delivery_count"] == 37
+    assert payload["summary"]["distance_meters"] == 0
+    assert payload["summary"]["duration_seconds"] == 0
+
+
+def test_optimize_maps_inconsistent_routing_matrix_to_unprocessable_entity():
+    client = TestClient(create_app(InconsistentRoutingProvider()))
+    response = post_workbook(client, workbook_bytes())
+    assert response.status_code == 422
+    assert "routing matrix size" in response.json()["detail"]
+
+
+def test_optimize_maps_unreachable_route_to_unprocessable_entity():
+    client = TestClient(create_app(UnreachableRoutingProvider()))
+    response = post_workbook(client, workbook_bytes())
+    assert response.status_code == 422
+    assert "complete road-network route" in response.json()["detail"]
+
+
 def test_optimize_maps_routing_failure_to_bad_gateway():
     client = TestClient(create_app(FailingRoutingProvider()))
-    response = client.post(
-        "/optimize",
-        files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
-    )
+    response = post_workbook(client, workbook_bytes())
     assert response.status_code == 502
     assert "Routing provider failed" in response.json()["detail"]
 
@@ -101,12 +169,24 @@ def test_optimize_maps_routing_failure_to_bad_gateway():
 def test_optimize_rejects_oversized_upload(monkeypatch):
     monkeypatch.setenv("OTIMIZER_MAX_UPLOAD_BYTES", "100")
     client = TestClient(create_app(FakeRoutingProvider()))
+    response = post_workbook(client, workbook_bytes())
+    assert response.status_code == 413
+    assert "byte limit" in response.json()["detail"]
+
+
+def test_optimize_rejects_destination_with_return_to_start():
+    client = TestClient(create_app(FakeRoutingProvider()))
     response = client.post(
         "/optimize",
         files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+        data={
+            "destination_latitude": "-16.72",
+            "destination_longitude": "-49.27",
+            "return_to_start": "true",
+        },
     )
-    assert response.status_code == 413
-    assert "byte limit" in response.json()["detail"]
+    assert response.status_code == 422
+    assert "cannot be combined" in response.json()["detail"]
 
 
 def test_cors_origins_are_configurable(monkeypatch):
