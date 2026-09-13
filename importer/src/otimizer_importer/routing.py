@@ -250,6 +250,40 @@ def fetch_osrm_table(
     )
 
 
+def _location_key(location: PhysicalStop | RouteEndpoint) -> tuple[float, float]:
+    """Return the exact routing coordinate identity for safe matrix deduplication."""
+    return (float(location.latitude), float(location.longitude))
+
+
+def _deduplicate_locations(
+    locations: Sequence[PhysicalStop | RouteEndpoint],
+) -> tuple[list[PhysicalStop | RouteEndpoint], list[int]]:
+    """Collapse identical coordinates while retaining an index for each input."""
+    unique: list[PhysicalStop | RouteEndpoint] = []
+    index_by_key: dict[tuple[float, float], int] = {}
+    expanded: list[int] = []
+    for location in locations:
+        key = _location_key(location)
+        unique_index = index_by_key.get(key)
+        if unique_index is None:
+            unique_index = len(unique)
+            index_by_key[key] = unique_index
+            unique.append(location)
+        expanded.append(unique_index)
+    return unique, expanded
+
+
+def _expand_matrix(
+    matrix: tuple[tuple[TravelMetric | None, ...], ...],
+    expanded_indices: Sequence[int],
+) -> tuple[tuple[TravelMetric | None, ...], ...]:
+    """Expand a deduplicated matrix back to the caller's original location order."""
+    return tuple(
+        tuple(matrix[source_index][destination_index] for destination_index in expanded_indices)
+        for source_index in expanded_indices
+    )
+
+
 def build_route_matrix(
     stops: list[PhysicalStop],
     origin: RouteEndpoint | None = None,
@@ -257,13 +291,27 @@ def build_route_matrix(
     *,
     provider: RoutingProvider | None = None,
 ) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Build one matrix ordered as optional origin, stops, optional destination."""
+    """Build one matrix ordered as optional origin, stops, optional destination.
+
+    Identical coordinates are queried only once and then expanded back to the
+    original order. This is safe because road-network cost depends on the
+    routing coordinates, not on the delivery/property metadata attached to a
+    location.
+    """
     locations: list[PhysicalStop | RouteEndpoint] = []
     if origin is not None:
         locations.append(origin)
     locations.extend(stops)
     if destination is not None:
         locations.append(destination)
+    if not locations:
+        raise ValueError("At least one route location is required")
     if provider is None:
         provider = OSRMRoutingProvider()
-    return provider.table(locations)
+
+    unique_locations, expanded_indices = _deduplicate_locations(locations)
+    unique_matrix = provider.table(unique_locations)
+    expected_size = len(unique_locations)
+    if len(unique_matrix) != expected_size or any(len(row) != expected_size for row in unique_matrix):
+        raise RoutingError("Routing provider returned a matrix with an invalid size")
+    return _expand_matrix(unique_matrix, expanded_indices)
