@@ -36,13 +36,14 @@ def row(
     tracking: str,
     latitude: object,
     longitude: object,
+    address: str | None = None,
 ) -> list[object]:
     return [
         f"ID-{row_id}",
         sequence,
         stop,
         tracking,
-        f"Endereço anonimizado {row_id}",
+        address if address is not None else f"Endereço anonimizado {row_id}",
         "Bairro teste",
         "Cidade teste",
         "00000-000",
@@ -56,8 +57,8 @@ def test_real_world_case_missing_sequence_and_dash_values_keeps_every_valid_deli
     write_xlsx(
         path,
         [
-            row(1, 1, 1, "TN-001", -16.700001, -49.200001),
-            row(2, None, "-", "TN-002", -16.700001, -49.200001),
+            row(1, 1, 1, "TN-001", -16.700001, -49.200001, "Rua A, 100"),
+            row(2, None, "-", "TN-002", -16.700001, -49.200001, "Rua A, 100"),
             row(3, "-", "-", "TN-003", -16.710001, -49.210001),
             row(4, 4, 2, "TN-004", None, -49.220001),
         ],
@@ -101,10 +102,10 @@ def test_multiple_deliveries_at_one_location_are_one_routed_physical_stop(tmp_pa
     write_xlsx(
         path,
         [
-            row(1, "-", "-", "TN-201", -16.700000, -49.200000),
-            row(2, None, "-", "TN-202", -16.700000, -49.200000),
-            row(3, None, None, "TN-203", -16.700000, -49.200000),
-            row(4, 9, 9, "TN-204", -16.700000, -49.200000),
+            row(1, "-", "-", "TN-201", -16.700000, -49.200000, "Rua A, 100"),
+            row(2, None, "-", "TN-202", -16.700000, -49.200000, "Rua A, 100"),
+            row(3, None, None, "TN-203", -16.700000, -49.200000, "Rua A, 100"),
+            row(4, 9, 9, "TN-204", -16.700000, -49.200000, "Rua A, 100"),
         ],
     )
 
