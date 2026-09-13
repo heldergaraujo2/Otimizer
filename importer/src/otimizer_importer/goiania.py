@@ -43,7 +43,7 @@ class GoianiaLocationProvider(LocationDataProvider):
                 if property_point is not None:
                     attributes = best_number.get("attributes") or {}
                     cadastral_id = attributes.get("id")
-                    access_point = self._nearest_street_access(evidence, property_point)
+                    access_point = self._nearest_street_access(property_point)
                     if access_point is not None:
                         return _resolved_with_access(
                             property_point,
@@ -70,7 +70,7 @@ class GoianiaLocationProvider(LocationDataProvider):
 
         attributes = best.get("attributes") or {}
         cadastral_id = attributes.get("id")
-        access_point = self._nearest_street_access(evidence, property_point)
+        access_point = self._nearest_street_access(property_point)
         if access_point is not None:
             return _resolved_with_access(
                 property_point,
@@ -88,18 +88,35 @@ class GoianiaLocationProvider(LocationDataProvider):
         )
 
     def _query_lots(self, evidence: LocationEvidence) -> list[dict]:
-        return self._query_layer(evidence, LOT_LAYER_ID, "id,id_qdr,nm_lot,nm_imovel,id_seg")
+        return self._query_layer_at_point(
+            evidence.latitude,
+            evidence.longitude,
+            LOT_LAYER_ID,
+            "id,id_qdr,nm_lot,nm_imovel,id_seg",
+        )
 
     def _query_official_numbers(self, evidence: LocationEvidence) -> list[dict]:
-        return self._query_layer(evidence, OFFICIAL_NUMBER_LAYER_ID, "id,nm_npo,cd_log,cd_rua,cd_bai,ci")
+        return self._query_layer_at_point(
+            evidence.latitude,
+            evidence.longitude,
+            OFFICIAL_NUMBER_LAYER_ID,
+            "id,nm_npo,cd_log,cd_rua,cd_bai,ci",
+        )
 
-    def _query_street_segments(self, evidence: LocationEvidence) -> list[dict]:
-        return self._query_layer(evidence, STREET_SEGMENT_LAYER_ID, "id_seg,cd_log,cd_rua")
+    def _query_street_segments(self, latitude: float, longitude: float) -> list[dict]:
+        return self._query_layer_at_point(latitude, longitude, STREET_SEGMENT_LAYER_ID, "id_seg,cd_log,cd_rua")
 
     def _nearest_street_access(
-        self, evidence: LocationEvidence, property_point: tuple[float, float]
+        self, property_point: tuple[float, float]
     ) -> tuple[float, float] | None:
-        segments = self._query_street_segments(evidence)
+        """Find the nearest street candidate around the resolved property point.
+
+        The search is centered on the cadastral/property point rather than the
+        original XLSX GPS coordinate. This matters when the spreadsheet GPS is
+        on the parcel interior or has meaningful positional error.
+        """
+        longitude, latitude = property_point
+        segments = self._query_street_segments(latitude, longitude)
         best: tuple[float, tuple[float, float]] | None = None
         for feature in segments:
             for path in (feature.get("geometry") or {}).get("paths") or []:
@@ -110,11 +127,11 @@ class GoianiaLocationProvider(LocationDataProvider):
                         best = (distance, candidate)
         return best[1] if best is not None else None
 
-    def _query_layer(self, evidence: LocationEvidence, layer_id: int, out_fields: str) -> list[dict]:
+    def _query_layer_at_point(self, latitude: float, longitude: float, layer_id: int, out_fields: str) -> list[dict]:
         delta = 0.0005
         params = {
             "where": "1=1",
-            "geometry": f"{evidence.longitude - delta},{evidence.latitude - delta},{evidence.longitude + delta},{evidence.latitude + delta}",
+            "geometry": f"{longitude - delta},{latitude - delta},{longitude + delta},{latitude + delta}",
             "geometryType": "esriGeometryEnvelope",
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
