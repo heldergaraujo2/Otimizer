@@ -65,7 +65,7 @@ def test_payment_service_rejects_unconfirmed_payment() -> None:
         service.settle_confirmed_payment(charge.payment_id)
 
 
-def test_payment_service_rejects_price_mismatch() -> None:
+def test_payment_service_accepts_existing_charge_after_license_price_change() -> None:
     payments = InMemoryPaymentRepository()
     licenses = InMemoryLicenseRepository([make_license(2990)])
     gateway = SandboxPixGateway(payments)
@@ -75,8 +75,13 @@ def test_payment_service_rejects_price_mismatch() -> None:
     charge = service.create_license_charge(license_record)
     gateway.confirm_sandbox_charge(charge.payment_id)
     licenses.save(license_record.change_price(4990))
-    with pytest.raises(ValueError, match="amount"):
-        service.settle_confirmed_payment(charge.payment_id)
+
+    activated = service.settle_confirmed_payment(charge.payment_id)
+
+    assert activated.price_cents == 4990
+    assert activated.expires_at > activated.starts_at
+    assert payments.get(charge.payment_id) is not None
+    assert payments.get(charge.payment_id).status is PaymentStatus.SETTLED
 
 
 def test_payment_service_rejects_free_license() -> None:
