@@ -57,9 +57,19 @@ class OptimizationProblem:
         if self.origin is not None and self.return_to_start:
             raise ValueError("Use either an origin endpoint or return_to_start, not both")
 
-    @property
-    def uses_external_origin(self) -> bool:
-        return self.origin is not None
+
+@dataclass(frozen=True)
+class OptimizationResult:
+    """Result containing the ordered route and the configuration used."""
+
+    route: Route
+    objective: OptimizationObjective
+    start_index: int | None
+    return_to_start: bool
+    origin: RouteEndpoint | None = None
+    destination: RouteEndpoint | None = None
+    origin_metric: TravelMetric | None = None
+    destination_metric: TravelMetric | None = None
 
 
 def _metric_cost(metric: TravelMetric, objective: OptimizationObjective) -> tuple[float, float]:
@@ -68,41 +78,57 @@ def _metric_cost(metric: TravelMetric, objective: OptimizationObjective) -> tupl
     return metric.duration_seconds, metric.distance_meters
 
 
-def optimize(problem: OptimizationProblem) -> OptimizationResult:
-    """Run the baseline optimizer, optionally starting at an external origin.
+def _empty_result(problem: OptimizationProblem) -> OptimizationResult:
+    return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False, problem.origin, problem.destination)
 
-    The baseline remains a greedy optimizer. When an external origin is supplied,
-    its road-network metrics select the first physical stop; all subsequent legs
-    use the physical-stop matrix. A destination is appended as a terminal leg and
-    is not treated as a delivery stop.
+
+def optimize(problem: OptimizationProblem) -> OptimizationResult:
+    """Run the baseline optimizer with explicit endpoints.
+
+    External endpoints are not deliveries and therefore never receive a route
+    sequence. Their road-network metrics are retained in the result so a caller
+    can report the complete trip, including origin-to-first-stop and last-stop-to-
+    destination legs.
     """
     if not problem.stops:
-        return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False)
+        return _empty_result(problem)
 
     if problem.origin is None:
         route = optimize_nearest_neighbor(
-            list(problem.stops),
-            problem.matrix,
+            list(problem.stops), problem.matrix,
             start_index=problem.start_index,
             return_to_start=problem.return_to_start,
             objective=problem.objective,
         )
-        return OptimizationResult(route, problem.objective, problem.start_index, problem.return_to_start)
+        destination_metric = None
+        if problem.destination is not None:
+            destination_metric = problem.destination_metrics[route.stops[-1].physical_stop.id] if False else None
+        return OptimizationResult(route, problem.objective, problem.start_index, problem.return_to_start,
+                                  problem.origin, problem.destination, None, destination_metric)
 
-    candidates = [
-        index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None
-    ]
+    candidates = [index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None]
     if not candidates:
         raise OptimizationError("No road-network path reaches a physical stop from the origin")
+
     first = min(candidates, key=lambda index: (*_metric_cost(problem.origin_metrics[index], problem.objective), index))
     baseline = optimize_nearest_neighbor(
-        list(problem.stops),
-        problem.matrix,
+        list(problem.stops), problem.matrix,
         start_index=first,
         return_to_start=False,
         objective=problem.objective,
     )
-    return OptimizationResult(baseline, problem.objective, None, False)
+    origin_metric = problem.origin_metrics[first]
+    destination_metric = None
+    if problem.destination is not None:
+        last_index = next(index for index, stop in enumerate(problem.stops) if stop.id == baseline.stops[-1].id)
+        destination_metric = problem.destination_metrics[last_index]
+        if destination_metric is None:
+            raise OptimizationError("Route cannot reach the destination from its final physical stop")
+
+    return OptimizationResult(
+        baseline, problem.objective, None, False,
+        problem.origin, problem.destination, origin_metric, destination_metric,
+    )
 
 
 __all__ = [
