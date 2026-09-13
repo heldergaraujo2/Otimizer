@@ -14,6 +14,7 @@ from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
 from otimizer_api.auth import AuthenticationService
 from otimizer_api.licensing import LicenseAuthorizer
+from otimizer_api.payments import PaymentService, PaymentStatus
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -21,6 +22,10 @@ DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 class LoginRequest(BaseModel):
     email: str
     password: str
+
+
+class PixChargeRequest(BaseModel):
+    license_id: str
 
 
 def _max_upload_bytes() -> int:
@@ -49,6 +54,17 @@ def _endpoint(latitude: float | None, longitude: float | None, name: str) -> Rou
     if latitude is None or longitude is None:
         raise HTTPException(status_code=422, detail=f"{name} requires both latitude and longitude")
     return RouteEndpoint(latitude, longitude, name)
+
+
+def _serialize_charge(charge) -> dict:
+    return {
+        "payment_id": charge.payment_id,
+        "license_id": charge.license_id,
+        "amount_cents": charge.amount_cents,
+        "expires_at": charge.expires_at.isoformat(),
+        "pix_copy_paste": charge.pix_copy_paste,
+        "status": charge.status.value,
+    }
 
 
 def _serialize(result) -> dict:
@@ -109,6 +125,7 @@ def create_app(
     routing_provider: RoutingProvider | None = None,
     license_authorizer: LicenseAuthorizer | None = None,
     auth_service: AuthenticationService | None = None,
+    payment_service: PaymentService | None = None,
 ) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
     api.add_middleware(
@@ -118,6 +135,14 @@ def create_app(
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type", "Authorization", "X-Otimizer-Account-ID"],
     )
+
+    def authenticated_account(authorization: str | None):
+        if auth_service is None:
+            raise HTTPException(status_code=503, detail="Authentication is not configured")
+        authenticated = auth_service.authenticate_bearer(authorization)
+        if authenticated is None:
+            raise HTTPException(status_code=401, detail="Authentication is required")
+        return authenticated.account
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -139,12 +164,7 @@ def create_app(
 
     @api.get("/auth/me")
     def me(authorization: Annotated[str | None, Header()] = None) -> dict:
-        if auth_service is None:
-            raise HTTPException(status_code=503, detail="Authentication is not configured")
-        authenticated = auth_service.authenticate_bearer(authorization)
-        if authenticated is None:
-            raise HTTPException(status_code=401, detail="Authentication is required")
-        account = authenticated.account
+        account = authenticated_account(authorization)
         return {"account_id": account.account_id, "email": account.email}
 
     @api.post("/auth/logout")
@@ -154,6 +174,36 @@ def create_app(
         if not auth_service.logout(authorization):
             raise HTTPException(status_code=401, detail="Authentication is required")
         return {"logged_out": True}
+
+    @api.post("/payments/pix")
+    def create_pix_charge(
+        payload: PixChargeRequest,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict:
+        account = authenticated_account(authorization)
+        if payment_service is None or payment_service.license_repository is None:
+            raise HTTPException(status_code=503, detail="Payments are not configured")
+        license_record = payment_service.license_repository.get_by_id(payload.license_id.strip())
+        if license_record is None or license_record.account_id != account.account_id:
+            raise HTTPException(status_code=404, detail="License not found")
+        try:
+            charge = payment_service.create_license_charge(license_record)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        return _serialize_charge(charge)
+
+    @api.get("/payments/pix/{payment_id}")
+    def get_pix_charge(
+        payment_id: str,
+        authorization: Annotated[str | None, Header()] = None,
+    ) -> dict:
+        account = authenticated_account(authorization)
+        if payment_service is None:
+            raise HTTPException(status_code=503, detail="Payments are not configured")
+        charge = payment_service.repository.get(payment_id)
+        if charge is None or charge.account_id != account.account_id:
+            raise HTTPException(status_code=404, detail="Payment not found")
+        return _serialize_charge(charge)
 
     @api.post("/optimize")
     async def optimize_route(
