@@ -1,3 +1,4 @@
+import pytest
 from openpyxl import Workbook
 
 from otimizer_importer.location import ResolvedLocation
@@ -47,13 +48,13 @@ def test_service_preserves_location_provenance_on_physical_stop(tmp_path):
     )
 
     stop = result.physical_stops[0]
-    assert stop.latitude == -16.699
-    assert stop.longitude == -49.248
+    assert stop.latitude == pytest.approx(-16.699)
+    assert stop.longitude == pytest.approx(-49.248)
     assert stop.location_confidence == 0.9
     assert stop.location_source == "test-provider"
-    assert stop.property_latitude == -16.699
-    assert stop.property_longitude == -49.248
-    assert stop.access_latitude == -16.6985
-    assert stop.access_longitude == -49.2475
+    assert stop.property_latitude == pytest.approx(-16.699)
+    assert stop.property_longitude == pytest.approx(-49.248)
+    assert stop.access_latitude == pytest.approx(-16.6985)
+    assert stop.access_longitude == pytest.approx(-49.2475)
     assert stop.cadastral_id == "CAD-123"
     assert result.route.stops[0].physical_stop.location_source == "test-provider"
