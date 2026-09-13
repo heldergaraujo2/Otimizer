@@ -5,12 +5,13 @@ import tempfile
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
 from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
+from otimizer_api.licensing import LicenseAuthorizer
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -97,14 +98,17 @@ def _serialize(result) -> dict:
     }
 
 
-def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
+def create_app(
+    routing_provider: RoutingProvider | None = None,
+    license_authorizer: LicenseAuthorizer | None = None,
+) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
     api.add_middleware(
         CORSMiddleware,
         allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
-        allow_headers=["Content-Type"],
+        allow_headers=["Content-Type", "X-Otimizer-Account-ID"],
     )
 
     @api.get("/health")
@@ -120,7 +124,15 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
         destination_latitude: Annotated[float | None, Form()] = None,
         destination_longitude: Annotated[float | None, Form()] = None,
         return_to_start: Annotated[bool, Form()] = False,
+        account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None,
     ) -> dict:
+        if license_authorizer is not None:
+            if not account_id or not account_id.strip():
+                raise HTTPException(status_code=401, detail="Authentication is required")
+            decision = license_authorizer.authorize_route(account_id.strip())
+            if not decision.allowed:
+                raise HTTPException(status_code=403, detail={"code": decision.code, "message": decision.message})
+
         if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
             raise HTTPException(status_code=422, detail="The uploaded file must be an .xlsx workbook")
         origin = _endpoint(origin_latitude, origin_longitude, "origin")
