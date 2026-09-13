@@ -15,15 +15,15 @@ class ParsedAddress:
 
 
 _QUADRA_RE = re.compile(
-    r"\b(?:q|qd|quadra)\s*[:.=\-]?\s*([a-z0-9]+(?:[./-][a-z0-9]+)*)\b",
+    r"\b(?:quadra|qd|q)\s*[:.=\-]?\s*([a-z0-9]+(?:[./-][a-z0-9]+)*)\b",
     re.IGNORECASE,
 )
 _LOTE_RE = re.compile(
-    r"\b(?:lt|lote)\s*[:.=\-]?\s*([a-z0-9]+(?:[./-][a-z0-9]+)*)\b",
+    r"\b(?:lote|lt)\s*[:.=\-]?\s*([a-z0-9]+(?:[./-][a-z0-9]+)*)\b",
     re.IGNORECASE,
 )
 _NUMBER_AFTER_SEPARATOR_RE = re.compile(
-    r"(?:^|[,;])\s*(\d+[a-z]?(?:[-/]\d+)?)\b",
+    r"(?:^|[,;])\s*(?!q(?:d|uadra)?\b|l(?:t|ote)?\b)(\d+[a-z]?(?:[-/]\d+)?)\b",
     re.IGNORECASE,
 )
 _NUMBER_FALLBACK_RE = re.compile(
@@ -50,9 +50,9 @@ def _extract_field(pattern: re.Pattern[str], text: str) -> str | None:
 
 
 def _extract_number(text: str) -> str | None:
-    # Prefer the number in an address segment after a comma/semicolon. This
-    # avoids interpreting a street name such as "Rua PA 9" as the house number
-    # when the actual number follows it ("Rua PA 9, 49, ...").
+    # Prefer the numeric address segment after a comma/semicolon. This avoids
+    # treating a street code such as "Rua PA 9" as the house number when the
+    # actual number follows it ("Rua PA 9, 49, ...").
     match = _NUMBER_AFTER_SEPARATOR_RE.search(text)
     if match:
         return match.group(1)
@@ -63,6 +63,8 @@ def _extract_number(text: str) -> str | None:
     if re.search(r"\bS\s*/\s*N\b|\bSN\b|\bSEM\s+NUMERO\b", upper):
         return None
 
+    # Fallback for formats such as "Rua X 123" where no comma separates the
+    # house number. Explicit Q/Qd/Lt/Lote markers are ignored by design.
     match = _NUMBER_FALLBACK_RE.search(text)
     return match.group(1) if match else None
 
@@ -70,9 +72,9 @@ def _extract_number(text: str) -> str | None:
 def parse_address(value: str | None) -> ParsedAddress:
     """Extract optional house number, Quadra and Lote from free-form text.
 
-    The parser is deliberately conservative: it only extracts a field when a
-    recognizable Brazilian address marker is present and always preserves the
-    original address for downstream geocoding/cadastral lookup.
+    The parser is deliberately conservative: it extracts only recognizable
+    location markers, preserves the original address, and never requires a
+    particular combination of fields.
     """
     original = value.strip() if value and value.strip() else None
     if original is None:
