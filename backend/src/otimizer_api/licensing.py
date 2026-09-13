@@ -23,7 +23,11 @@ class Entitlements:
 
 @dataclass(frozen=True)
 class License:
-    """A server-owned license record."""
+    """A server-owned license record.
+
+    ``price_cents`` is the configured price for this license. It is stored on
+    the license itself so later price changes do not alter historical charges.
+    """
 
     license_id: str
     account_id: str
@@ -31,6 +35,11 @@ class License:
     expires_at: datetime
     entitlements: Entitlements = field(default_factory=Entitlements)
     revoked_at: datetime | None = None
+    price_cents: int = 0
+
+    def __post_init__(self) -> None:
+        if self.price_cents < 0:
+            raise ValueError("price_cents must be non-negative")
 
     def is_active(self, now: datetime | None = None) -> bool:
         current = _utc(now)
