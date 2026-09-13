@@ -175,9 +175,21 @@ def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, ti
         return source_indices, destination_indices, tile
 
     with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
-        futures = [executor.submit(fetch_tile, source_chunk, destination_chunk) for source_chunk in chunks for destination_chunk in chunks]
+        futures = {
+            executor.submit(fetch_tile, source_chunk, destination_chunk): (source_chunk, destination_chunk)
+            for source_chunk in chunks
+            for destination_chunk in chunks
+        }
         for future in as_completed(futures):
-            source_indices, destination_indices, tile = future.result()
+            source_chunk, destination_chunk = futures[future]
+            try:
+                source_indices, destination_indices, tile = future.result()
+            except Exception as exc:
+                source_label = f"{source_chunk.start}:{source_chunk.stop}"
+                destination_label = f"{destination_chunk.start}:{destination_chunk.stop}"
+                raise RoutingError(
+                    f"OSRM tile failed (sources {source_label}, destinations {destination_label})"
+                ) from exc
             for row_offset, source_index in enumerate(source_indices):
                 for column_offset, destination_index in enumerate(destination_indices):
                     matrix[source_index][destination_index] = tile[row_offset][column_offset]
