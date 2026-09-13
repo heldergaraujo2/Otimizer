@@ -35,18 +35,27 @@ def _normalize_address(value: str | None) -> str | None:
 
 def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str | None]:
     return (
-        _normalize_address(delivery.address),
+        delivery.normalized_address or _normalize_address(delivery.address),
         _normalize_text(delivery.quadra),
         _normalize_text(delivery.lote),
     )
 
 
+def _address_compatible(first: Delivery, second: Delivery) -> bool:
+    """Reject a merge when known address identity contradicts."""
+    first_address = _location_evidence(first)[0]
+    second_address = _location_evidence(second)[0]
+    if first_address is None or second_address is None:
+        return True
+    return first_address == second_address
+
+
 def _property_compatible(first: Delivery, second: Delivery) -> bool:
-    """Reject a merge when known Quadra/Lote values contradict."""
-    for left, right in zip(_location_evidence(first)[1:], _location_evidence(second)[1:]):
-        if left is not None and right is not None and left != right:
-            return False
-    return True
+    """Reject a merge when known address/property values contradict."""
+    return _address_compatible(first, second) and all(
+        left is None or right is None or left == right
+        for left, right in zip(_location_evidence(first)[1:], _location_evidence(second)[1:])
+    )
 
 
 def _has_shared_strong_evidence(first: Delivery, second: Delivery) -> bool:
@@ -77,11 +86,12 @@ def group_physical_stops(
 ) -> list[PhysicalStop]:
     """Group deliveries into physical stops without using source Stop/Sequence.
 
-    Identical coordinates remain one physical location by default, preserving
-    the delivery-domain rule. If known Quadra/Lote values conflict, the rows
-    are kept in separate physical stops so one GPS point cannot erase distinct
-    properties. Distinct coordinates can be reconciled for GPS jitter when
-    address/Quadra/Lote evidence agrees and the distance is within tolerance.
+    Identical coordinates remain one physical location when their known
+    address/property evidence is compatible. Contradictory known addresses or
+    Quadra/Lote values are kept in separate physical stops so one GPS point
+    cannot erase distinct properties. Distinct coordinates can be reconciled
+    for GPS jitter when explicit evidence agrees and the distance is within
+    tolerance.
     """
     if address_tolerance_meters < 0:
         raise ValueError("address_tolerance_meters cannot be negative")
@@ -120,8 +130,7 @@ def group_physical_stops(
             )
 
     # Reconcile neighboring GPS points only when explicit location evidence
-    # agrees. This is deliberately conservative: proximity alone never merges
-    # two unrelated addresses.
+    # agrees. Proximity alone never merges two unrelated addresses.
     reconciled: list[PhysicalStop] = []
     for stop in stops:
         representative = stop.deliveries[0]
