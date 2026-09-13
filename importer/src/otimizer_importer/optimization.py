@@ -109,6 +109,10 @@ def _add_cost(left: tuple[float, float], right: tuple[float, float]) -> tuple[fl
     return left[0] + right[0], left[1] + right[1]
 
 
+def _subtract_cost(left: tuple[float, float], right: tuple[float, float]) -> tuple[float, float]:
+    return left[0] - right[0], left[1] - right[1]
+
+
 def _order_cost(order, problem: OptimizationProblem):
     """Return total lexicographic objective cost for a complete order."""
     total = (0.0, 0.0)
@@ -138,7 +142,13 @@ def _order_cost(order, problem: OptimizationProblem):
 
 
 def _two_opt(order, problem: OptimizationProblem):
-    """Improve a complete route while preserving its first and last endpoints."""
+    """Improve a complete route while preserving its first and last endpoints.
+
+    Candidate scores are updated by delta instead of rescanning the complete
+    route. For directed road costs, reversing a segment also reverses every
+    internal arc, so the implementation uses prefix sums of both directions
+    and a prefix count of unreachable reverse arcs.
+    """
     current = tuple(order)
     current_cost = _order_cost(current, problem)
     if current_cost is None:
@@ -151,15 +161,58 @@ def _two_opt(order, problem: OptimizationProblem):
         best_cost = current_cost
         size = len(current)
 
-        # Reversing a segment is valid for directed road costs only when the
-        # resulting directed legs are present, so every candidate is scored
-        # against the actual routing matrix rather than using a symmetric delta.
+        # forward_prefix[i] is the cost of arcs [0, i), while reverse_prefix[i]
+        # is the cost of the opposite arcs for those same adjacent positions.
+        forward_prefix = [(0.0, 0.0)] * size
+        reverse_prefix = [(0.0, 0.0)] * size
+        reverse_missing = [0] * size
+        for index in range(size - 1):
+            forward = problem.matrix[current[index]][current[index + 1]]
+            reverse = problem.matrix[current[index + 1]][current[index]]
+            forward_prefix[index + 1] = (
+                _add_cost(forward_prefix[index], _metric_cost(forward, problem.objective))
+                if forward is not None else forward_prefix[index]
+            )
+            reverse_prefix[index + 1] = (
+                _add_cost(reverse_prefix[index], _metric_cost(reverse, problem.objective))
+                if reverse is not None else reverse_prefix[index]
+            )
+            reverse_missing[index + 1] = reverse_missing[index] + (reverse is None)
+
         for start in range(1, size - 1):
             for end in range(start + 1, size):
-                candidate = current[:start] + current[start:end + 1][::-1] + current[end + 1:]
-                candidate_cost = _order_cost(candidate, problem)
-                if candidate_cost is not None and candidate_cost < best_cost:
-                    best_order = candidate
+                # Existing boundary arcs are start-1 -> start and end -> end+1.
+                old_boundary = (0.0, 0.0)
+                new_boundary = (0.0, 0.0)
+
+                left_old = problem.matrix[current[start - 1]][current[start]]
+                right_old = problem.matrix[current[end]][current[end + 1]] if end + 1 < size else None
+                left_new = problem.matrix[current[start - 1]][current[end]]
+                right_new = problem.matrix[current[start]][current[end + 1]] if end + 1 < size else None
+
+                if left_old is None or left_new is None:
+                    continue
+                old_boundary = _add_cost(old_boundary, _metric_cost(left_old, problem.objective))
+                new_boundary = _add_cost(new_boundary, _metric_cost(left_new, problem.objective))
+
+                if end + 1 < size:
+                    if right_old is None or right_new is None:
+                        continue
+                    old_boundary = _add_cost(old_boundary, _metric_cost(right_old, problem.objective))
+                    new_boundary = _add_cost(new_boundary, _metric_cost(right_new, problem.objective))
+
+                # Internal arcs [start, end) are traversed in reverse after 2-opt.
+                if reverse_missing[end] - reverse_missing[start] > 0:
+                    continue
+                old_internal = _subtract_cost(forward_prefix[end], forward_prefix[start])
+                new_internal = _subtract_cost(reverse_prefix[end], reverse_prefix[start])
+                delta = _add_cost(
+                    _subtract_cost(new_boundary, old_boundary),
+                    _subtract_cost(new_internal, old_internal),
+                )
+                candidate_cost = _add_cost(current_cost, delta)
+                if candidate_cost < best_cost:
+                    best_order = current[:start] + current[start:end + 1][::-1] + current[end + 1:]
                     best_cost = candidate_cost
 
         if best_order != current:
