@@ -64,6 +64,18 @@ def test_parse_osrm_table_rejects_wrong_matrix_size():
         parse_osrm_table(payload, expected_size=2)
 
 
+def test_parse_osrm_table_rejects_negative_metric():
+    payload = json.dumps({"code": "Ok", "distances": [[0, -1], [0, 0]], "durations": [[0, 1], [0, 0]]})
+    with pytest.raises(RoutingError, match="invalid metric"):
+        parse_osrm_table(payload, expected_size=2)
+
+
+def test_parse_osrm_table_rejects_non_finite_metric():
+    payload = '{"code":"Ok","distances":[[0,NaN],[0,0]],"durations":[[0,1],[0,0]]}'
+    with pytest.raises(RoutingError, match="invalid metric"):
+        parse_osrm_table(payload, expected_size=2)
+
+
 def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
     locations = [stop(index, -16.0 - index, -49.0 - index) for index in range(5)]
     requests = []
