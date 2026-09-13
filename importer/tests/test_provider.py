@@ -1,6 +1,11 @@
 from otimizer_importer.models import Delivery, PhysicalStop
-from otimizer_importer.provider import OsrmRoutingProvider, RoutingProvider
-from otimizer_importer.routing import RouteEndpoint, TravelMetric
+from otimizer_importer.routing import (
+    OSRMRoutingProvider,
+    RouteEndpoint,
+    RoutingProvider,
+    TravelMetric,
+    build_route_matrix,
+)
 
 
 def make_stop(index: int) -> PhysicalStop:
@@ -38,7 +43,7 @@ def test_fake_provider_can_supply_a_routing_matrix_without_network_access():
 
 
 def test_osrm_provider_is_configurable():
-    provider = OsrmRoutingProvider(base_url="https://example.test/router", timeout_seconds=3.5)
+    provider = OSRMRoutingProvider(base_url="https://example.test/router", timeout_seconds=3.5)
 
     assert provider.base_url == "https://example.test/router"
     assert provider.timeout_seconds == 3.5
@@ -47,7 +52,6 @@ def test_osrm_provider_is_configurable():
 def test_provider_receives_endpoints_and_stops_in_route_matrix_order():
     matrix = tuple(tuple(TravelMetric(0, 0) for _ in range(4)) for _ in range(4))
     provider = FakeRoutingProvider(matrix)
-    from otimizer_importer.routing import build_route_matrix
 
     origin = RouteEndpoint(-16.70, -49.20, id="origin")
     destination = RouteEndpoint(-16.73, -49.23, id="destination")
