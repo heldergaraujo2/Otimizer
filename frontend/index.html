@@ -13,6 +13,24 @@
       <div><span class="eyebrow">OTIMIZER</span><h1>Otimize sua rota</h1></div>
       <span id="status" class="status">Pronto</span>
     </header>
+
+    <section class="panel account-panel">
+      <h2>Conta e licença</h2>
+      <div id="account-signed-out">
+        <div class="controls">
+          <label>E-mail<input id="login-email" type="email" autocomplete="email" placeholder="seu@email.com"></label>
+          <label>Senha<input id="login-password" type="password" autocomplete="current-password" placeholder="Sua senha"></label>
+        </div>
+        <button id="login" class="primary">Entrar</button>
+      </div>
+      <div id="account-signed-in" hidden>
+        <div class="account-row"><span id="account-email">—</span><button id="logout" class="secondary">Sair</button></div>
+        <div id="license-status" class="license-status">Consultando licença…</div>
+        <button id="renew" class="secondary" hidden>Renovar com Pix</button>
+      </div>
+      <p id="account-error" class="error" role="alert" hidden></p>
+    </section>
+
     <section class="panel setup-panel">
       <h2>1. Arquivo de entregas</h2>
       <label class="file-drop" for="file-input">
