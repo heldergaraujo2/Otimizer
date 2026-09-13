@@ -3,6 +3,7 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
+from otimizer_importer.location import ResolvedLocation
 from otimizer_importer.routing import RoutingError, TravelMetric
 from otimizer_api.main import create_app
 
@@ -13,6 +14,21 @@ class FakeRoutingProvider:
         return tuple(
             tuple(TravelMetric(abs(row - col) * 1000, abs(row - col) * 60) for col in range(size))
             for row in range(size)
+        )
+
+
+class FakeLocationProvider:
+    def resolve(self, evidence):
+        return ResolvedLocation(
+            latitude=-16.701,
+            longitude=-49.251,
+            confidence=0.96,
+            source="test-resolved-location",
+            property_latitude=-16.7015,
+            property_longitude=-49.2515,
+            access_latitude=-16.701,
+            access_longitude=-49.251,
+            cadastral_id="CAD-TEST-1",
         )
 
 
@@ -85,6 +101,21 @@ def test_optimize_returns_frontend_ready_route_result():
     assert [stop["sequence"] for stop in payload["route"]] == [1, 2]
     assert [stop["delivery_count"] for stop in payload["route"]] == [1, 2]
     assert len(payload["legs"]) == 1
+
+
+def test_optimize_serializes_resolved_location_provenance():
+    client = TestClient(create_app(FakeRoutingProvider(), location_provider=FakeLocationProvider()))
+    response = post_workbook(client, workbook_bytes())
+
+    assert response.status_code == 200
+    locations = [stop["location"] for stop in response.json()["route"]]
+    assert all(location["source"] == "test-resolved-location" for location in locations)
+    assert all(location["confidence"] == 0.96 for location in locations)
+    assert all(location["property_latitude"] == -16.7015 for location in locations)
+    assert all(location["property_longitude"] == -49.2515 for location in locations)
+    assert all(location["access_latitude"] == -16.701 for location in locations)
+    assert all(location["access_longitude"] == -49.251 for location in locations)
+    assert all(location["cadastral_id"] == "CAD-TEST-1" for location in locations)
 
 
 def test_optimize_includes_endpoint_leg_and_all_stop_deliveries():
