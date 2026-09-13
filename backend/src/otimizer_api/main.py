@@ -75,6 +75,8 @@ def _serialize(result) -> dict:
                         "neighborhood": delivery.neighborhood,
                         "city": delivery.city,
                         "zipcode": delivery.zipcode,
+                        "quadra": delivery.quadra,
+                        "lote": delivery.lote,
                         "latitude": delivery.latitude,
                         "longitude": delivery.longitude,
                     }
