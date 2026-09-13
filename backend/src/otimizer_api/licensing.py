@@ -1,9 +1,4 @@
-"""Licensing domain and authorization primitives for Otimizer.
-
-The production implementation will persist these objects in a database and
-receive trusted payment confirmations from a payment provider. This module
-keeps route authorization independent from the future persistence layer.
-"""
+"""Licensing domain and authorization primitives for Otimizer."""
 
 from __future__ import annotations
 
@@ -23,11 +18,7 @@ class Entitlements:
 
 @dataclass(frozen=True)
 class License:
-    """A server-owned license record.
-
-    ``price_cents`` is the configured price for this license. It is stored on
-    the license itself so later price changes do not alter historical charges.
-    """
+    """A server-owned license record with its configured price."""
 
     license_id: str
     account_id: str
@@ -42,12 +33,7 @@ class License:
             raise ValueError("price_cents must be non-negative")
 
     def change_price(self, price_cents: int) -> "License":
-        """Return this license with a new configured price.
-
-        The operation is immutable: the caller must persist the returned
-        license. Payment records keep their own amount, so changing this value
-        cannot retroactively change an already-created Pix charge.
-        """
+        """Return this license with a new configured price without mutation."""
         if price_cents < 0:
             raise ValueError("price_cents must be non-negative")
         return replace(self, price_cents=price_cents)
@@ -66,20 +52,27 @@ class LicenseDecision:
 
 
 class LicenseRepository(Protocol):
-    def get_active_license(self, account_id: str, now: datetime) -> License | None:
-        """Return the currently active license for an account, if any."""
+    def get_active_license(self, account_id: str, now: datetime) -> License | None: ...
+    def get_by_id(self, license_id: str) -> License | None: ...
+    def save(self, license_record: License) -> None: ...
 
 
 class InMemoryLicenseRepository:
     """Development repository; replace with a database adapter in production."""
 
     def __init__(self, licenses: list[License] | None = None) -> None:
-        self._licenses = list(licenses or [])
+        self._licenses = {item.license_id: item for item in licenses or []}
+
+    def save(self, license_record: License) -> None:
+        self._licenses[license_record.license_id] = license_record
+
+    def get_by_id(self, license_id: str) -> License | None:
+        return self._licenses.get(license_id)
 
     def get_active_license(self, account_id: str, now: datetime) -> License | None:
         matches = (
             license_record
-            for license_record in self._licenses
+            for license_record in self._licenses.values()
             if license_record.account_id == account_id and license_record.is_active(now)
         )
         return max(matches, key=lambda item: item.expires_at, default=None)
@@ -95,24 +88,10 @@ class LicenseAuthorizer:
         current = _utc(now)
         license_record = self.repository.get_active_license(account_id, current)
         if license_record is None:
-            return LicenseDecision(
-                allowed=False,
-                code="LICENSE_REQUIRED",
-                message="A valid license is required to generate a route.",
-            )
+            return LicenseDecision(False, "LICENSE_REQUIRED", "A valid license is required to generate a route.")
         if not license_record.entitlements.route_optimization:
-            return LicenseDecision(
-                allowed=False,
-                code="FEATURE_NOT_ENTITLED",
-                message="The current plan does not allow route optimization.",
-                license=license_record,
-            )
-        return LicenseDecision(
-            allowed=True,
-            code="AUTHORIZED",
-            message="Route optimization authorized.",
-            license=license_record,
-        )
+            return LicenseDecision(False, "FEATURE_NOT_ENTITLED", "The current plan does not allow route optimization.", license_record)
+        return LicenseDecision(True, "AUTHORIZED", "Route optimization authorized.", license_record)
 
 
 def _utc(value: datetime | None) -> datetime:
