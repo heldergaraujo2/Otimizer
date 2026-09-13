@@ -18,24 +18,17 @@ DEFAULT_FEATURE_BASE_URL = (
     "MapaServer/Feature_Base/FeatureServer"
 )
 LOT_LAYER_ID = 0
-PROPERTY_NUMBER_LAYER_ID = 5
 
 
 class GoianiaLocationProvider(LocationDataProvider):
     """Resolve an XLSX GPS point against Goiânia's public cadastral layers.
 
-    This first adapter deliberately treats the XLSX GPS coordinate as the
-    search anchor. It does not pretend that cadastral polygons are the
-    vehicle's stopping point: the returned location is a property/cadastral
-    evidence point and can later feed an access-point resolver.
+    The XLSX GPS coordinate is the search anchor. The returned location is a
+    cadastral property evidence point, not a claimed vehicle stopping point.
+    A later access-point resolver can use the property geometry and road data.
     """
 
-    def __init__(
-        self,
-        *,
-        base_url: str = DEFAULT_FEATURE_BASE_URL,
-        timeout_seconds: float = 5.0,
-    ) -> None:
+    def __init__(self, *, base_url: str = DEFAULT_FEATURE_BASE_URL, timeout_seconds: float = 5.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
 
@@ -43,21 +36,17 @@ class GoianiaLocationProvider(LocationDataProvider):
         if (evidence.city or "").strip().casefold() not in {"goiania", "goiânia"}:
             return None
 
-        lot = self._query_layer(
-            LOT_LAYER_ID,
-            evidence,
-            out_fields="id,id_qdr,nm_lot,nm_imovel,id_seg",
-        )
-        if not lot:
+        features = self._query_lots(evidence)
+        if not features:
             return None
 
-        feature = lot[0]
-        geometry = feature.get("geometry") or {}
+        best = min(features, key=lambda feature: _distance_sq_to_geometry(evidence, feature.get("geometry") or {}))
+        geometry = best.get("geometry") or {}
         point = _representative_point(geometry)
         if point is None:
             return None
 
-        attributes = feature.get("attributes") or {}
+        attributes = best.get("attributes") or {}
         cadastral_id = attributes.get("id")
         return ResolvedLocation(
             latitude=point[1],
@@ -69,16 +58,10 @@ class GoianiaLocationProvider(LocationDataProvider):
             cadastral_id=str(cadastral_id) if cadastral_id is not None else None,
         )
 
-    def _query_layer(
-        self,
-        layer_id: int,
-        evidence: LocationEvidence,
-        *,
-        out_fields: str,
-    ) -> list[dict]:
-        # A small envelope makes the first adapter useful even when the GPS
-        # pin is on the road immediately beside a cadastral polygon. Exact
-        # property/access matching remains a later resolver stage.
+    def _query_lots(self, evidence: LocationEvidence) -> list[dict]:
+        # Small envelope around the GPS pin: useful when the delivery pin is
+        # on the street beside the cadastral polygon. Exact address/lot
+        # matching and vehicle access-point selection remain separate stages.
         delta = 0.0005
         params = {
             "where": "1=1",
@@ -86,13 +69,13 @@ class GoianiaLocationProvider(LocationDataProvider):
             "geometryType": "esriGeometryEnvelope",
             "inSR": "4326",
             "spatialRel": "esriSpatialRelIntersects",
-            "outFields": out_fields,
+            "outFields": "id,id_qdr,nm_lot,nm_imovel,id_seg",
             "returnGeometry": "true",
             "outSR": "4326",
-            "resultRecordCount": "5",
+            "resultRecordCount": "10",
             "f": "json",
         }
-        url = f"{self.base_url}/{layer_id}/query?{urlencode(params)}"
+        url = f"{self.base_url}/{LOT_LAYER_ID}/query?{urlencode(params)}"
         request = Request(url, headers={"User-Agent": "Otimizer/0.1"})
         try:
             with urlopen(request, timeout=self.timeout_seconds) as response:
@@ -103,11 +86,26 @@ class GoianiaLocationProvider(LocationDataProvider):
 
 
 def _representative_point(geometry: dict) -> tuple[float, float] | None:
-    """Return a safe representative point from ArcGIS polygon geometry."""
+    """Return a polygon centroid for the first ArcGIS ring."""
     rings = geometry.get("rings")
-    if not rings or not rings[0]:
+    if not rings or not rings[0] or len(rings[0]) < 3:
         return None
     points = rings[0]
-    longitude = sum(point[0] for point in points) / len(points)
-    latitude = sum(point[1] for point in points) / len(points)
-    return longitude, latitude
+    area_twice = 0.0
+    cx = 0.0
+    cy = 0.0
+    for current, nxt in zip(points, points[1:] + points[:1]):
+        cross = current[0] * nxt[1] - nxt[0] * current[1]
+        area_twice += cross
+        cx += (current[0] + nxt[0]) * cross
+        cy += (current[1] + nxt[1]) * cross
+    if abs(area_twice) < 1e-12:
+        return points[0][0], points[0][1]
+    return cx / (3 * area_twice), cy / (3 * area_twice)
+
+
+def _distance_sq_to_geometry(evidence: LocationEvidence, geometry: dict) -> float:
+    point = _representative_point(geometry)
+    if point is None:
+        return float("inf")
+    return (point[0] - evidence.longitude) ** 2 + (point[1] - evidence.latitude) ** 2
