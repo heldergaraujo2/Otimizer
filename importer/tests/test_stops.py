@@ -97,6 +97,18 @@ def test_different_addresses_nearby_stay_separate():
     assert len(stops) == 2
 
 
+def test_different_addresses_at_same_coordinate_stay_separate():
+    deliveries = [
+        delivery(2, -16.6869, -49.2648, "1", "Rua das Flores, 100"),
+        delivery(3, -16.6869, -49.2648, "2", "Rua das Flores, 102"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 2
+    assert sum(stop.delivery_count for stop in stops) == 2
+
+
 def test_different_lotes_at_same_coordinate_stay_separate():
     deliveries = [
         delivery(2, -16.6869, -49.2648, "1", "Rua das Flores, 100", "A", "10"),
