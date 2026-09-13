@@ -1,3 +1,5 @@
+from enum import Enum
+
 from .models import PhysicalStop, Route
 from .routing import TravelMetric
 
@@ -6,17 +8,25 @@ class OptimizationError(RuntimeError):
     """Raised when a complete road-network route cannot be produced."""
 
 
+class OptimizationObjective(str, Enum):
+    """Primary metric used by the baseline greedy optimizer."""
+
+    TIME = "time"
+    DISTANCE = "distance"
+
+
 def optimize_nearest_neighbor(
     stops: list[PhysicalStop],
     matrix: tuple[tuple[TravelMetric | None, ...], ...],
     *,
     start_index: int = 0,
     return_to_start: bool = False,
+    objective: OptimizationObjective = OptimizationObjective.TIME,
 ) -> Route:
-    """Build a complete route using road-network travel time as the greedy cost.
+    """Build a complete route using a road-network metric as greedy cost.
 
-    This is deliberately a deterministic first optimizer. It never uses source
-    Sequence/Stop values and refuses to silently omit an unreachable physical stop.
+    This deterministic baseline never uses source Sequence/Stop values and
+    refuses to silently omit an unreachable physical stop.
     """
     size = len(stops)
     if size == 0:
@@ -35,14 +45,19 @@ def optimize_nearest_neighbor(
         candidates = [index for index in remaining if matrix[current][index] is not None]
         if not candidates:
             raise OptimizationError("No road-network path reaches all physical stops")
-        next_index = min(
-            candidates,
-            key=lambda index: (
+        if objective == OptimizationObjective.DISTANCE:
+            key = lambda index: (
+                matrix[current][index].distance_meters,
+                matrix[current][index].duration_seconds,
+                index,
+            )
+        else:
+            key = lambda index: (
                 matrix[current][index].duration_seconds,
                 matrix[current][index].distance_meters,
                 index,
-            ),
-        )
+            )
+        next_index = min(candidates, key=key)
         order.append(next_index)
         remaining.remove(next_index)
         current = next_index
