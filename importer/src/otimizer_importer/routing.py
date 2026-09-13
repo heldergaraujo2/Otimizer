@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 import json
 from typing import Protocol, Sequence
-from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .models import PhysicalStop
@@ -47,8 +46,8 @@ def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url
     """Build an OSRM Table request for physical stops and external endpoints."""
     if not locations:
         raise ValueError("At least one location is required")
-    encoded = quote(_coordinates(locations), safe=",;.-")
-    return f"{base_url.rstrip('/')}/table/v1/driving/{encoded}?annotations=distance,duration"
+    coordinates = _coordinates(locations)
+    return f"{base_url.rstrip('/')}/table/v1/driving/{coordinates}?annotations=distance,duration"
 
 
 def parse_osrm_table(payload: str | bytes, expected_size: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
