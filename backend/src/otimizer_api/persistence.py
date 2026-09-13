@@ -1,10 +1,4 @@
-"""Durable SQLite repositories for Otimizer account, session and license state.
-
-SQLite is the first durable adapter so local development and a single backend
-instance do not depend on process memory. The repository interfaces remain
-provider-neutral and can later be backed by PostgreSQL without changing the
-authentication or licensing policy.
-"""
+"""Durable SQLite repositories for Otimizer account, session and license state."""
 
 from __future__ import annotations
 
@@ -50,8 +44,7 @@ class SQLiteDatabase:
                     expires_at TEXT NOT NULL,
                     revoked_at TEXT
                 );
-                CREATE INDEX IF NOT EXISTS idx_sessions_token_hash
-                    ON sessions(token_hash);
+                CREATE INDEX IF NOT EXISTS idx_sessions_token_hash ON sessions(token_hash);
 
                 CREATE TABLE IF NOT EXISTS licenses (
                     license_id TEXT PRIMARY KEY,
@@ -61,12 +54,16 @@ class SQLiteDatabase:
                     route_optimization INTEGER NOT NULL DEFAULT 1,
                     max_devices INTEGER NOT NULL DEFAULT 1,
                     max_routes_per_day INTEGER,
+                    price_cents INTEGER NOT NULL DEFAULT 0,
                     revoked_at TEXT
                 );
                 CREATE INDEX IF NOT EXISTS idx_licenses_account_dates
                     ON licenses(account_id, starts_at, expires_at);
                 """
             )
+            columns = {row["name"] for row in connection.execute("PRAGMA table_info(licenses)")}
+            if "price_cents" not in columns:
+                connection.execute("ALTER TABLE licenses ADD COLUMN price_cents INTEGER NOT NULL DEFAULT 0")
 
 
 class SQLiteAccountRepository(AccountRepository):
@@ -80,9 +77,7 @@ class SQLiteAccountRepository(AccountRepository):
                 INSERT INTO accounts(account_id, email, password_hash, active)
                 VALUES (?, ?, ?, ?)
                 ON CONFLICT(account_id) DO UPDATE SET
-                    email=excluded.email,
-                    password_hash=excluded.password_hash,
-                    active=excluded.active
+                    email=excluded.email, password_hash=excluded.password_hash, active=excluded.active
                 """,
                 (account.account_id, account.email.strip().casefold(), account.password_hash, int(account.active)),
             )
@@ -115,10 +110,8 @@ class SQLiteSessionRepository(SessionRepository):
                 INSERT INTO sessions(session_id, account_id, token_hash, expires_at, revoked_at)
                 VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT(session_id) DO UPDATE SET
-                    account_id=excluded.account_id,
-                    token_hash=excluded.token_hash,
-                    expires_at=excluded.expires_at,
-                    revoked_at=excluded.revoked_at
+                    account_id=excluded.account_id, token_hash=excluded.token_hash,
+                    expires_at=excluded.expires_at, revoked_at=excluded.revoked_at
                 """,
                 (
                     session.session_id,
@@ -140,10 +133,7 @@ class SQLiteSessionRepository(SessionRepository):
 
     def revoke(self, session_id: str, revoked_at: datetime) -> None:
         with self.database.connect() as connection:
-            connection.execute(
-                "UPDATE sessions SET revoked_at = ? WHERE session_id = ?",
-                (_iso(revoked_at), session_id),
-            )
+            connection.execute("UPDATE sessions SET revoked_at = ? WHERE session_id = ?", (_iso(revoked_at), session_id))
 
 
 class SQLiteLicenseRepository(LicenseRepository):
@@ -156,16 +146,13 @@ class SQLiteLicenseRepository(LicenseRepository):
                 """
                 INSERT INTO licenses(
                     license_id, account_id, starts_at, expires_at,
-                    route_optimization, max_devices, max_routes_per_day, revoked_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    route_optimization, max_devices, max_routes_per_day, price_cents, revoked_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(license_id) DO UPDATE SET
-                    account_id=excluded.account_id,
-                    starts_at=excluded.starts_at,
-                    expires_at=excluded.expires_at,
-                    route_optimization=excluded.route_optimization,
-                    max_devices=excluded.max_devices,
-                    max_routes_per_day=excluded.max_routes_per_day,
-                    revoked_at=excluded.revoked_at
+                    account_id=excluded.account_id, starts_at=excluded.starts_at,
+                    expires_at=excluded.expires_at, route_optimization=excluded.route_optimization,
+                    max_devices=excluded.max_devices, max_routes_per_day=excluded.max_routes_per_day,
+                    price_cents=excluded.price_cents, revoked_at=excluded.revoked_at
                 """,
                 (
                     license_record.license_id,
@@ -175,6 +162,7 @@ class SQLiteLicenseRepository(LicenseRepository):
                     int(license_record.entitlements.route_optimization),
                     license_record.entitlements.max_devices,
                     license_record.entitlements.max_routes_per_day,
+                    license_record.price_cents,
                     _iso(license_record.revoked_at) if license_record.revoked_at else None,
                 ),
             )
@@ -185,14 +173,10 @@ class SQLiteLicenseRepository(LicenseRepository):
             row = connection.execute(
                 """
                 SELECT license_id, account_id, starts_at, expires_at,
-                       route_optimization, max_devices, max_routes_per_day, revoked_at
+                       route_optimization, max_devices, max_routes_per_day, price_cents, revoked_at
                 FROM licenses
-                WHERE account_id = ?
-                  AND starts_at <= ?
-                  AND expires_at > ?
-                  AND revoked_at IS NULL
-                ORDER BY expires_at DESC
-                LIMIT 1
+                WHERE account_id = ? AND starts_at <= ? AND expires_at > ? AND revoked_at IS NULL
+                ORDER BY expires_at DESC LIMIT 1
                 """,
                 (account_id, current, current),
             ).fetchone()
@@ -211,21 +195,14 @@ def build_sqlite_services(path: str | Path) -> tuple[SQLiteDatabase, Authenticat
 def _account_from_row(row: sqlite3.Row | None) -> Account | None:
     if row is None:
         return None
-    return Account(
-        account_id=row["account_id"],
-        email=row["email"],
-        password_hash=row["password_hash"],
-        active=bool(row["active"]),
-    )
+    return Account(account_id=row["account_id"], email=row["email"], password_hash=row["password_hash"], active=bool(row["active"]))
 
 
 def _session_from_row(row: sqlite3.Row | None) -> Session | None:
     if row is None:
         return None
     return Session(
-        session_id=row["session_id"],
-        account_id=row["account_id"],
-        token_hash=row["token_hash"],
+        session_id=row["session_id"], account_id=row["account_id"], token_hash=row["token_hash"],
         expires_at=_parse_datetime(row["expires_at"]),
         revoked_at=_parse_datetime(row["revoked_at"]) if row["revoked_at"] else None,
     )
@@ -235,16 +212,14 @@ def _license_from_row(row: sqlite3.Row | None) -> License | None:
     if row is None:
         return None
     return License(
-        license_id=row["license_id"],
-        account_id=row["account_id"],
-        starts_at=_parse_datetime(row["starts_at"]),
-        expires_at=_parse_datetime(row["expires_at"]),
+        license_id=row["license_id"], account_id=row["account_id"],
+        starts_at=_parse_datetime(row["starts_at"]), expires_at=_parse_datetime(row["expires_at"]),
         entitlements=Entitlements(
             route_optimization=bool(row["route_optimization"]),
-            max_devices=int(row["max_devices"]),
-            max_routes_per_day=row["max_routes_per_day"],
+            max_devices=int(row["max_devices"]), max_routes_per_day=row["max_routes_per_day"],
         ),
         revoked_at=_parse_datetime(row["revoked_at"]) if row["revoked_at"] else None,
+        price_cents=int(row["price_cents"]),
     )
 
 
