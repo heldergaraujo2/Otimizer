@@ -66,6 +66,20 @@ function navigationUrl(stop) {
   return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${stop.latitude},${stop.longitude}`)}&travelmode=driving`;
 }
 
+function locationSummary(stop) {
+  const location = stop.location || {};
+  if (!location.source) return "Localização: GPS da planilha";
+  const confidence = Number(location.confidence);
+  const percentage = Number.isFinite(confidence) ? ` · confiança ${Math.round(confidence * 100)}%` : "";
+  if (location.access_latitude != null && location.access_longitude != null) {
+    return `Ponto de acesso viário resolvido${percentage}`;
+  }
+  if (location.property_latitude != null && location.property_longitude != null) {
+    return `Localização da propriedade resolvida${percentage}`;
+  }
+  return `Localização resolvida${percentage}`;
+}
+
 function renderMap(route) {
   if (!route.length || typeof L === "undefined") return;
   if (!map) map = L.map("map");
@@ -93,6 +107,7 @@ function showStop(index) {
   $("detail-content").innerHTML = `
     <div class="detail-address"><strong>${escapeHtml(deliveries[0]?.address || "Endereço não informado")}</strong><br>${escapeHtml(deliveries[0]?.neighborhood || "")} ${escapeHtml(deliveries[0]?.city || "")}</div>
     <p><strong>${deliveries.length}</strong> entrega(s) nesta parada</p>
+    <p>${escapeHtml(locationSummary(stop))}</p>
     ${deliveries.map(delivery => `<article class="delivery-card"><strong>${escapeHtml(delivery.tracking_number || "Rastreio não informado")}</strong><span>${escapeHtml(delivery.address || "Endereço não informado")}</span></article>`).join("")}
     <a class="navigation-button" href="${navigationUrl(stop)}" target="_blank" rel="noopener">Navegar até esta parada</a>
   `;
