@@ -51,7 +51,13 @@ class InMemoryPaymentRepository:
 
 
 class PixGateway(Protocol):
-    def create_charge(self, account_id: str, amount_cents: int, expires_in: timedelta) -> PixCharge: ...
+    def create_charge(
+        self,
+        account_id: str,
+        license_id: str,
+        amount_cents: int,
+        expires_in: timedelta,
+    ) -> PixCharge: ...
 
     def confirm_sandbox_charge(self, payment_id: str) -> PixCharge: ...
 
@@ -62,19 +68,27 @@ class SandboxPixGateway:
     def __init__(self, repository: PaymentRepository) -> None:
         self.repository = repository
 
-    def create_charge(self, account_id: str, amount_cents: int, expires_in: timedelta) -> PixCharge:
+    def create_charge(
+        self,
+        account_id: str,
+        license_id: str,
+        amount_cents: int,
+        expires_in: timedelta,
+    ) -> PixCharge:
+        if not account_id:
+            raise ValueError("account_id is required")
+        if not license_id:
+            raise ValueError("license_id is required")
         if amount_cents <= 0:
             raise ValueError("amount_cents must be positive")
         if expires_in <= timedelta(0):
             raise ValueError("expires_in must be positive")
         now = datetime.now(timezone.utc)
         payment_id = str(uuid4())
-        # The gateway does not know the license; PaymentService binds the
-        # resulting charge to the server-selected license before persistence.
         charge = PixCharge(
             payment_id=payment_id,
             account_id=account_id,
-            license_id="",
+            license_id=license_id,
             amount_cents=amount_cents,
             expires_at=now + expires_in,
             pix_copy_paste=f"otimizer-sandbox-pix:{payment_id}",
@@ -116,11 +130,9 @@ class PaymentService:
     ) -> PixCharge:
         if license_record.price_cents <= 0:
             raise ValueError("license price must be positive before creating a Pix charge")
-        charge = self.gateway.create_charge(
+        return self.gateway.create_charge(
             license_record.account_id,
+            license_record.license_id,
             license_record.price_cents,
             expires_in,
         )
-        bound = replace(charge, license_id=license_record.license_id)
-        self.repository.save(bound)
-        return bound
