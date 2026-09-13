@@ -11,10 +11,10 @@ from __future__ import annotations
 import sqlite3
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Callable
 
 from .accounts import Account, AccountRepository, Session, SessionRepository
-from .licensing import Entitlements, License, LicenseRepository
+from .auth import AuthenticationService
+from .licensing import Entitlements, License, LicenseAuthorizer, LicenseRepository
 
 
 class SQLiteDatabase:
@@ -197,6 +197,15 @@ class SQLiteLicenseRepository(LicenseRepository):
                 (account_id, current, current),
             ).fetchone()
         return _license_from_row(row)
+
+
+def build_sqlite_services(path: str | Path) -> tuple[SQLiteDatabase, AuthenticationService, LicenseAuthorizer]:
+    """Build the durable authentication/licensing stack for one backend instance."""
+    database = SQLiteDatabase(path)
+    accounts = SQLiteAccountRepository(database)
+    sessions = SQLiteSessionRepository(database)
+    licenses = SQLiteLicenseRepository(database)
+    return database, AuthenticationService(accounts, sessions), LicenseAuthorizer(licenses)
 
 
 def _account_from_row(row: sqlite3.Row | None) -> Account | None:
