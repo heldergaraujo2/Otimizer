@@ -30,11 +30,21 @@ class GoianiaLocationProvider(LocationDataProvider):
     def __init__(self, *, base_url: str = DEFAULT_FEATURE_BASE_URL, timeout_seconds: float = 5.0) -> None:
         self.base_url = base_url.rstrip("/")
         self.timeout_seconds = timeout_seconds
+        self._resolution_cache: dict[tuple[object, ...], ResolvedLocation | None] = {}
 
     def resolve(self, evidence: LocationEvidence) -> ResolvedLocation | None:
         if (evidence.city or "").strip().casefold() not in {"goiania", "goiânia"}:
             return None
 
+        cache_key = _resolution_cache_key(evidence)
+        if cache_key in self._resolution_cache:
+            return self._resolution_cache[cache_key]
+
+        resolved = self._resolve_uncached(evidence)
+        self._resolution_cache[cache_key] = resolved
+        return resolved
+
+    def _resolve_uncached(self, evidence: LocationEvidence) -> ResolvedLocation | None:
         if evidence.number:
             official_numbers = self._query_official_numbers(evidence)
             best_number = _best_matching_official_number(evidence, official_numbers)
@@ -149,6 +159,21 @@ class GoianiaLocationProvider(LocationDataProvider):
         except (OSError, ValueError, json.JSONDecodeError):
             return []
         return payload.get("features") or []
+
+
+def _resolution_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
+    """Build a conservative key so incompatible address evidence never shares a result."""
+    return (
+        evidence.latitude,
+        evidence.longitude,
+        evidence.normalized_address,
+        evidence.number,
+        evidence.quadra,
+        evidence.lote,
+        evidence.zipcode,
+        evidence.neighborhood,
+        evidence.city,
+    )
 
 
 def _resolved_with_access(
