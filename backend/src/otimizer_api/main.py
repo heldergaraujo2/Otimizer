@@ -11,6 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
+from otimizer_importer.location import LocationDataProvider
 from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
 from otimizer_api.auth import AuthenticationService
@@ -106,6 +107,15 @@ def _serialize(result) -> dict:
                 "id": stop.id,
                 "latitude": stop.physical_stop.latitude,
                 "longitude": stop.physical_stop.longitude,
+                "location": {
+                    "confidence": stop.physical_stop.location_confidence,
+                    "source": stop.physical_stop.location_source,
+                    "property_latitude": stop.physical_stop.property_latitude,
+                    "property_longitude": stop.physical_stop.property_longitude,
+                    "access_latitude": stop.physical_stop.access_latitude,
+                    "access_longitude": stop.physical_stop.access_longitude,
+                    "cadastral_id": stop.physical_stop.cadastral_id,
+                },
                 "delivery_count": stop.delivery_count,
                 "deliveries": [
                     {
@@ -145,6 +155,7 @@ def create_app(
     license_authorizer: LicenseAuthorizer | None = None,
     auth_service: AuthenticationService | None = None,
     payment_service: PaymentService | None = None,
+    location_provider: LocationDataProvider | None = None,
 ) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
     api.add_middleware(
@@ -278,7 +289,8 @@ def create_app(
             temporary_path = Path(temporary.name)
         try:
             result = optimize_deliveries_file(
-                str(temporary_path), routing_provider=routing_provider, origin=origin,
+                str(temporary_path), routing_provider=routing_provider,
+                location_provider=location_provider, origin=origin,
                 destination=destination, return_to_start=return_to_start, objective=objective,
             )
         except RoutingError as exc:
