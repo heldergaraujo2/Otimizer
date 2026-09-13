@@ -3,7 +3,7 @@ from io import BytesIO
 from fastapi.testclient import TestClient
 from openpyxl import Workbook
 
-from otimizer_importer.routing import TravelMetric
+from otimizer_importer.routing import RoutingError, TravelMetric
 from otimizer_api.main import create_app
 
 
@@ -14,6 +14,11 @@ class FakeRoutingProvider:
             tuple(TravelMetric(abs(row - col) * 1000, abs(row - col) * 60) for col in range(size))
             for row in range(size)
         )
+
+
+class FailingRoutingProvider:
+    def table(self, locations):
+        raise RoutingError("routing service unavailable")
 
 
 def workbook_bytes() -> bytes:
@@ -81,3 +86,38 @@ def test_optimize_rejects_invalid_endpoint_pair():
     )
     assert response.status_code == 422
     assert "both latitude and longitude" in response.json()["detail"]
+
+
+def test_optimize_maps_routing_failure_to_bad_gateway():
+    client = TestClient(create_app(FailingRoutingProvider()))
+    response = client.post(
+        "/optimize",
+        files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 502
+    assert "Routing provider failed" in response.json()["detail"]
+
+
+def test_optimize_rejects_oversized_upload(monkeypatch):
+    monkeypatch.setenv("OTIMIZER_MAX_UPLOAD_BYTES", "100")
+    client = TestClient(create_app(FakeRoutingProvider()))
+    response = client.post(
+        "/optimize",
+        files={"file": ("deliveries.xlsx", workbook_bytes(), "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")},
+    )
+    assert response.status_code == 413
+    assert "byte limit" in response.json()["detail"]
+
+
+def test_cors_origins_are_configurable(monkeypatch):
+    monkeypatch.setenv("OTIMIZER_CORS_ORIGINS", "https://app.example.com, https://admin.example.com")
+    client = TestClient(create_app(FakeRoutingProvider()))
+    response = client.options(
+        "/optimize",
+        headers={
+            "Origin": "https://app.example.com",
+            "Access-Control-Request-Method": "POST",
+        },
+    )
+    assert response.status_code == 200
+    assert response.headers["access-control-allow-origin"] == "https://app.example.com"
