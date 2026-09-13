@@ -1,18 +1,10 @@
-from enum import Enum
-
 from .models import PhysicalStop, Route
 from .routing import TravelMetric
+from .types import OptimizationObjective
 
 
 class OptimizationError(RuntimeError):
     """Raised when a complete road-network route cannot be produced."""
-
-
-class OptimizationObjective(str, Enum):
-    """Primary metric used by the baseline greedy optimizer."""
-
-    TIME = "time"
-    DISTANCE = "distance"
 
 
 def optimize_nearest_neighbor(
@@ -66,3 +58,6 @@ def optimize_nearest_neighbor(
         raise OptimizationError("Route cannot return to its starting physical stop")
 
     return Route.from_physical_stops([stops[index] for index in order])
+
+
+__all__ = ["OptimizationError", "OptimizationObjective", "optimize_nearest_neighbor"]
