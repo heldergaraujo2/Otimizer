@@ -88,6 +88,7 @@ def _exact_order(
     matrix: tuple[tuple[TravelMetric | None, ...], ...],
     starts: tuple[int, ...],
     objective: OptimizationObjective,
+    origin_metrics: tuple[TravelMetric | None, ...] | None,
     destination_metrics: tuple[TravelMetric | None, ...] | None,
     return_to_start: bool,
 ) -> tuple[int, ...]:
@@ -134,21 +135,20 @@ def _exact_order(
         suffix = solve(start, initial_mask)
         if suffix is None:
             continue
-        candidate = (_metric_cost(_origin_metric_placeholder(), objective), ()) if False else None
         total = suffix[0]
+        if origin_metrics is not None:
+            origin_metric = origin_metrics[start]
+            if origin_metric is None:
+                continue
+            total = _add_cost(_metric_cost(origin_metric, objective), total)
         order = (start,) + suffix[1]
-        if best is None or (total, order) < best:
-            best = (total, order)
+        candidate = (total, order)
+        if best is None or candidate < best:
+            best = candidate
 
     if best is None:
         raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
     return best[1]
-
-
-def _origin_metric_placeholder() -> TravelMetric:
-    # Kept private solely to make the type checker happy in the deliberately
-    # unreachable branch above; it is never executed.
-    return TravelMetric(0.0, 0.0)
 
 
 def _greedy_order(
@@ -156,10 +156,11 @@ def _greedy_order(
     matrix: tuple[tuple[TravelMetric | None, ...], ...],
     starts: tuple[int, ...],
     objective: OptimizationObjective,
+    origin_metrics: tuple[TravelMetric | None, ...] | None,
     destination_metrics: tuple[TravelMetric | None, ...] | None,
     return_to_start: bool,
 ) -> tuple[int, ...]:
-    """Scalable deterministic heuristic with endpoint-aware final-leg choice."""
+    """Scalable deterministic heuristic with endpoint-aware total cost."""
     best: tuple[tuple[float, float], tuple[int, ...]] | None = None
     for start in starts:
         remaining = set(range(len(stops)))
@@ -167,6 +168,8 @@ def _greedy_order(
         order = [start]
         current = start
         total = (0.0, 0.0)
+        if origin_metrics is not None:
+            total = _add_cost(total, _metric_cost(origin_metrics[start], objective))
         while remaining:
             candidates = [i for i in remaining if matrix[current][i] is not None]
             if not candidates:
@@ -199,16 +202,14 @@ def _greedy_order(
     return best[1]
 
 
-def _optimize_order(
-    problem: OptimizationProblem,
-    starts: tuple[int, ...],
-) -> tuple[int, ...]:
+def _optimize_order(problem: OptimizationProblem, starts: tuple[int, ...]) -> tuple[int, ...]:
     if len(problem.stops) <= 12:
         return _exact_order(
             problem.stops,
             problem.matrix,
             starts,
             problem.objective,
+            problem.origin_metrics,
             problem.destination_metrics,
             problem.return_to_start,
         )
@@ -217,6 +218,7 @@ def _optimize_order(
         problem.matrix,
         starts,
         problem.objective,
+        problem.origin_metrics,
         problem.destination_metrics,
         problem.return_to_start,
     )
@@ -226,8 +228,8 @@ def optimize(problem: OptimizationProblem) -> OptimizationResult:
     """Optimize the complete road trip while preserving every physical stop.
 
     Up to twelve stops are solved exactly. Larger routes use a deterministic
-    scalable heuristic. In both modes, an external destination participates in
-    route selection rather than being checked only after the route is built.
+    scalable heuristic. In both modes, external endpoints participate in route
+    selection rather than being checked only after the route is built.
     """
     if not problem.stops:
         return OptimizationResult(
@@ -237,18 +239,17 @@ def optimize(problem: OptimizationProblem) -> OptimizationResult:
 
     if problem.origin is None:
         starts = (problem.start_index,)
-        origin_metric = None
     else:
         starts = tuple(
             index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None
         )
         if not starts:
             raise OptimizationError("No road-network path reaches a physical stop from the origin")
-        origin_metric = None
 
     order = _optimize_order(problem, starts)
     route = Route.from_physical_stops([problem.stops[index] for index in order])
 
+    origin_metric = None
     if problem.origin is not None:
         origin_metric = problem.origin_metrics[order[0]]
 
