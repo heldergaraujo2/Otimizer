@@ -1,8 +1,10 @@
 import json
+from urllib.parse import parse_qs, urlsplit
 
 import pytest
 
 from otimizer_importer.models import Delivery, PhysicalStop
+from otimizer_importer import routing
 from otimizer_importer.routing import (
     RoutingError,
     TravelMetric,
@@ -25,11 +27,30 @@ def test_osrm_table_url_uses_longitude_latitude_and_driving_profile():
     assert "annotations=distance,duration" in url
 
 
+def test_osrm_table_url_supports_source_and_destination_indices():
+    url = build_osrm_table_url(
+        [stop(1, -16.7, -49.2), stop(2, -16.71, -49.21), stop(3, -16.72, -49.22)],
+        sources=[0, 1],
+        destinations=[2],
+    )
+    assert "sources=0;1" in url
+    assert "destinations=2" in url
+
+
 def test_parse_osrm_table_preserves_unreachable_pairs():
     payload = json.dumps({"code": "Ok", "distances": [[0, 1200], [None, 0]], "durations": [[0, 180], [None, 0]]})
     matrix = parse_osrm_table(payload, expected_size=2)
     assert matrix[0][1] == TravelMetric(1200.0, 180.0)
     assert matrix[1][0] is None
+
+
+def test_parse_osrm_table_accepts_rectangular_matrix():
+    payload = json.dumps({"code": "Ok", "distances": [[10, 20, None], [30, 40, 50]], "durations": [[1, 2, None], [3, 4, 5]]})
+    matrix = parse_osrm_table(payload, expected_size=2, expected_columns=3)
+    assert matrix == (
+        (TravelMetric(10.0, 1.0), TravelMetric(20.0, 2.0), None),
+        (TravelMetric(30.0, 3.0), TravelMetric(40.0, 4.0), TravelMetric(50.0, 5.0)),
+    )
 
 
 def test_parse_osrm_table_rejects_provider_error():
@@ -41,6 +62,56 @@ def test_parse_osrm_table_rejects_wrong_matrix_size():
     payload = json.dumps({"code": "Ok", "distances": [[0]], "durations": [[0]]})
     with pytest.raises(RoutingError, match="matrix size"):
         parse_osrm_table(payload, expected_size=2)
+
+
+def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
+    locations = [stop(index, -16.0 - index, -49.0 - index) for index in range(5)]
+    requests = []
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self.payload = payload
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return self.payload
+
+    def fake_urlopen(request, timeout):
+        parsed = urlsplit(request.full_url)
+        query = parse_qs(parsed.query)
+        coordinates = parsed.path.split("/driving/", 1)[1].split("?")[0].split(";")
+        source_indices = [int(value) for value in query["sources"][0].split(";")] if "sources" in query else list(range(len(coordinates)))
+        destination_indices = [int(value) for value in query["destinations"][0].split(";")] if "destinations" in query else list(range(len(coordinates)))
+        requests.append((source_indices, destination_indices, coordinates))
+
+        distances = []
+        durations = []
+        for source_index in source_indices:
+            source_id = float(coordinates[source_index].split(",")[0])
+            distance_row = []
+            duration_row = []
+            for destination_index in destination_indices:
+                destination_id = float(coordinates[destination_index].split(",")[0])
+                distance_row.append(abs(source_id - destination_id) * 1000)
+                duration_row.append(abs(source_id - destination_id) * 10)
+            distances.append(distance_row)
+            durations.append(duration_row)
+        return FakeResponse(json.dumps({"code": "Ok", "distances": distances, "durations": durations}).encode())
+
+    monkeypatch.setattr(routing, "urlopen", fake_urlopen)
+    matrix = routing.fetch_osrm_table(locations, max_locations=3)
+
+    assert len(requests) == 4
+    assert len(matrix) == 5
+    assert all(len(row) == 5 for row in matrix)
+    assert matrix[0][4] == TravelMetric(4000.0, 40.0)
+    assert matrix[4][0] == TravelMetric(4000.0, 40.0)
+    assert matrix[2][2] == TravelMetric(0.0, 0.0)
 
 
 def test_build_route_matrix_uses_injected_provider():
