@@ -144,6 +144,25 @@ def test_different_quadra_stays_separate_even_with_same_address_and_nearby_gps()
     assert len(stops) == 2
 
 
+def test_transitive_reconciliation_does_not_merge_conflicting_properties():
+    deliveries = [
+        delivery(2, -16.686900, -49.264800, "1", "Rua das Flores, 100"),
+        delivery(3, -16.686905, -49.264805, "2", "Rua das Flores, 100"),
+        delivery(4, -16.686910, -49.264810, "3", "Rua das Flores, 102"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 2
+    assert sorted(stop.delivery_count for stop in stops) == [1, 2]
+    assert sorted(
+        delivery.tracking_number
+        for stop in stops
+        if stop.delivery_count == 1
+        for delivery in stop.deliveries
+    ) == ["TN-4"]
+
+
 def test_invalid_tolerance_is_rejected():
     delivery_one = delivery(2, -16.6869, -49.2648, "1")
 
