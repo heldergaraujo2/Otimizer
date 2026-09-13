@@ -37,6 +37,53 @@ class OptimizationProblem:
     origin_metrics: tuple[TravelMetric | None, ...] | None = None
     destination_metrics: tuple[TravelMetric | None, ...] | None = None
 
+    @classmethod
+    def from_full_matrix(
+        cls,
+        stops: tuple[PhysicalStop, ...],
+        full_matrix: tuple[tuple[TravelMetric | None, ...], ...],
+        *,
+        origin: RouteEndpoint | None = None,
+        destination: RouteEndpoint | None = None,
+        start_index: int = 0,
+        return_to_start: bool = False,
+        objective: OptimizationObjective = OptimizationObjective.TIME,
+    ) -> "OptimizationProblem":
+        """Create a problem from matrix order: origin, stops, destination.
+
+        This is the preferred API for callers that obtain routing data from
+        ``build_route_matrix``. Endpoints remain outside the physical-stop
+        matrix consumed by the optimizer.
+        """
+        size = len(stops)
+        expected = size + (1 if origin is not None else 0) + (1 if destination is not None else 0)
+        if len(full_matrix) != expected or any(len(row) != expected for row in full_matrix):
+            raise ValueError("Full routing matrix size does not match endpoints and physical stops")
+
+        origin_offset = 1 if origin is not None else 0
+        stop_start = origin_offset
+        stop_end = stop_start + size
+        matrix = tuple(tuple(row[stop_start:stop_end]) for row in full_matrix[stop_start:stop_end])
+        origin_metrics = None
+        if origin is not None:
+            origin_metrics = tuple(full_matrix[0][stop_start:stop_end])
+        destination_metrics = None
+        if destination is not None:
+            destination_index = expected - 1
+            destination_metrics = tuple(row[destination_index] for row in full_matrix[stop_start:stop_end])
+
+        return cls(
+            stops=stops,
+            matrix=matrix,
+            start_index=start_index,
+            return_to_start=return_to_start,
+            objective=objective,
+            origin=origin,
+            destination=destination,
+            origin_metrics=origin_metrics,
+            destination_metrics=destination_metrics,
+        )
+
     def __post_init__(self) -> None:
         size = len(self.stops)
         if len(self.matrix) != size or any(len(row) != size for row in self.matrix):
@@ -83,37 +130,22 @@ def _add_cost(left: tuple[float, float], right: tuple[float, float]) -> tuple[fl
     return left[0] + right[0], left[1] + right[1]
 
 
-def _exact_order(
-    stops: tuple[PhysicalStop, ...],
-    matrix: tuple[tuple[TravelMetric | None, ...], ...],
-    starts: tuple[int, ...],
-    objective: OptimizationObjective,
-    origin_metrics: tuple[TravelMetric | None, ...] | None,
-    destination_metrics: tuple[TravelMetric | None, ...] | None,
-    return_to_start: bool,
-) -> tuple[int, ...]:
-    """Solve a small route exactly with deterministic Held-Karp DP."""
+def _exact_order(stops, matrix, starts, objective, origin_metrics, destination_metrics, return_to_start):
     size = len(stops)
-    best: tuple[tuple[float, float], tuple[int, ...]] | None = None
-
+    best = None
     for start in starts:
         remaining = tuple(index for index in range(size) if index != start)
 
         @lru_cache(maxsize=None)
-        def solve(current: int, mask: int) -> tuple[tuple[float, float], tuple[int, ...]] | None:
+        def solve(current, mask):
             if mask == 0:
                 if destination_metrics is not None:
                     metric = destination_metrics[current]
-                    if metric is None:
-                        return None
-                    return _metric_cost(metric, objective), ()
+                    return None if metric is None else (_metric_cost(metric, objective), ())
                 if return_to_start:
                     metric = matrix[current][start]
-                    if metric is None:
-                        return None
-                    return _metric_cost(metric, objective), ()
-                return (0.0, 0.0), ()
-
+                    return None if metric is None else (_metric_cost(metric, objective), ())
+                return ((0.0, 0.0), ())
             best_suffix = None
             for offset, next_index in enumerate(remaining):
                 bit = 1 << offset
@@ -125,43 +157,30 @@ def _exact_order(
                 suffix = solve(next_index, mask ^ bit)
                 if suffix is None:
                     continue
-                candidate_cost = _add_cost(_metric_cost(metric, objective), suffix[0])
-                candidate = (candidate_cost, (next_index,) + suffix[1])
+                candidate = (_add_cost(_metric_cost(metric, objective), suffix[0]), (next_index,) + suffix[1])
                 if best_suffix is None or candidate < best_suffix:
                     best_suffix = candidate
             return best_suffix
 
-        initial_mask = (1 << len(remaining)) - 1
-        suffix = solve(start, initial_mask)
+        suffix = solve(start, (1 << len(remaining)) - 1)
         if suffix is None:
             continue
         total = suffix[0]
         if origin_metrics is not None:
-            origin_metric = origin_metrics[start]
-            if origin_metric is None:
+            metric = origin_metrics[start]
+            if metric is None:
                 continue
-            total = _add_cost(_metric_cost(origin_metric, objective), total)
-        order = (start,) + suffix[1]
-        candidate = (total, order)
+            total = _add_cost(_metric_cost(metric, objective), total)
+        candidate = (total, (start,) + suffix[1])
         if best is None or candidate < best:
             best = candidate
-
     if best is None:
         raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
     return best[1]
 
 
-def _greedy_order(
-    stops: tuple[PhysicalStop, ...],
-    matrix: tuple[tuple[TravelMetric | None, ...], ...],
-    starts: tuple[int, ...],
-    objective: OptimizationObjective,
-    origin_metrics: tuple[TravelMetric | None, ...] | None,
-    destination_metrics: tuple[TravelMetric | None, ...] | None,
-    return_to_start: bool,
-) -> tuple[int, ...]:
-    """Scalable deterministic heuristic with endpoint-aware total cost."""
-    best: tuple[tuple[float, float], tuple[int, ...]] | None = None
+def _greedy_order(stops, matrix, starts, objective, origin_metrics, destination_metrics, return_to_start):
+    best = None
     for start in starts:
         remaining = set(range(len(stops)))
         remaining.remove(start)
@@ -174,10 +193,7 @@ def _greedy_order(
             candidates = [i for i in remaining if matrix[current][i] is not None]
             if not candidates:
                 break
-            next_index = min(
-                candidates,
-                key=lambda i: (*_metric_cost(matrix[current][i], objective), i),
-            )
+            next_index = min(candidates, key=lambda i: (*_metric_cost(matrix[current][i], objective), i))
             total = _add_cost(total, _metric_cost(matrix[current][next_index], objective))
             order.append(next_index)
             remaining.remove(next_index)
@@ -202,80 +218,34 @@ def _greedy_order(
     return best[1]
 
 
-def _optimize_order(problem: OptimizationProblem, starts: tuple[int, ...]) -> tuple[int, ...]:
+def _optimize_order(problem, starts):
     if len(problem.stops) <= 12:
-        return _exact_order(
-            problem.stops,
-            problem.matrix,
-            starts,
-            problem.objective,
-            problem.origin_metrics,
-            problem.destination_metrics,
-            problem.return_to_start,
-        )
-    return _greedy_order(
-        problem.stops,
-        problem.matrix,
-        starts,
-        problem.objective,
-        problem.origin_metrics,
-        problem.destination_metrics,
-        problem.return_to_start,
-    )
+        return _exact_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
+    return _greedy_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
 
 
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
-    """Optimize the complete road trip while preserving every physical stop.
-
-    Up to twelve stops are solved exactly. Larger routes use a deterministic
-    scalable heuristic. In both modes, external endpoints participate in route
-    selection rather than being checked only after the route is built.
-    """
+    """Optimize the complete road trip while preserving every physical stop."""
     if not problem.stops:
-        return OptimizationResult(
-            Route.from_physical_stops([]), problem.objective, None, False,
-            problem.origin, problem.destination,
-        )
-
+        return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False, problem.origin, problem.destination)
     if problem.origin is None:
         starts = (problem.start_index,)
     else:
-        starts = tuple(
-            index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None
-        )
+        starts = tuple(index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None)
         if not starts:
             raise OptimizationError("No road-network path reaches a physical stop from the origin")
-
     order = _optimize_order(problem, starts)
     route = Route.from_physical_stops([problem.stops[index] for index in order])
-
-    origin_metric = None
-    if problem.origin is not None:
-        origin_metric = problem.origin_metrics[order[0]]
-
-    destination_metric = None
-    if problem.destination is not None:
-        destination_metric = problem.destination_metrics[order[-1]]
-        if destination_metric is None:
-            raise OptimizationError("Route cannot reach the destination from its final physical stop")
-
+    origin_metric = problem.origin_metrics[order[0]] if problem.origin is not None else None
+    destination_metric = problem.destination_metrics[order[-1]] if problem.destination is not None else None
+    if problem.destination is not None and destination_metric is None:
+        raise OptimizationError("Route cannot reach the destination from its final physical stop")
     return OptimizationResult(
-        route,
-        problem.objective,
+        route, problem.objective,
         order[0] if problem.origin is None else None,
         problem.return_to_start if problem.origin is None else False,
-        problem.origin,
-        problem.destination,
-        origin_metric,
-        destination_metric,
+        problem.origin, problem.destination, origin_metric, destination_metric,
     )
 
 
-__all__ = [
-    "OptimizationError",
-    "OptimizationObjective",
-    "OptimizationProblem",
-    "OptimizationResult",
-    "RouteEndpoint",
-    "optimize",
-]
+__all__ = ["OptimizationError", "OptimizationObjective", "OptimizationProblem", "OptimizationResult", "RouteEndpoint", "optimize"]
