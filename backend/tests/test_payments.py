@@ -84,6 +84,40 @@ def test_payment_service_accepts_existing_charge_after_license_price_change() ->
     assert payments.get(charge.payment_id).status is PaymentStatus.SETTLED
 
 
+def test_payment_service_confirms_provider_payment_only_when_amount_matches_charge() -> None:
+    payments = InMemoryPaymentRepository()
+    service = PaymentService(payments, SandboxPixGateway(payments))
+    charge = service.create_license_charge(make_license(2990))
+
+    with pytest.raises(ValueError, match="does not match"):
+        service.confirm_provider_payment(charge.payment_id, 4990)
+
+    confirmed = service.confirm_provider_payment(charge.payment_id, 2990)
+    assert confirmed.status is PaymentStatus.CONFIRMED
+    assert payments.get(charge.payment_id) == confirmed
+
+
+def test_payment_service_provider_confirmation_is_idempotent_for_same_amount() -> None:
+    payments = InMemoryPaymentRepository()
+    service = PaymentService(payments, SandboxPixGateway(payments))
+    charge = service.create_license_charge(make_license(2990))
+
+    first = service.confirm_provider_payment(charge.payment_id, 2990)
+    second = service.confirm_provider_payment(charge.payment_id, 2990)
+
+    assert second == first
+
+
+def test_payment_service_rejects_provider_amount_change_after_confirmation() -> None:
+    payments = InMemoryPaymentRepository()
+    service = PaymentService(payments, SandboxPixGateway(payments))
+    charge = service.create_license_charge(make_license(2990))
+    service.confirm_provider_payment(charge.payment_id, 2990)
+
+    with pytest.raises(ValueError, match="does not match"):
+        service.confirm_provider_payment(charge.payment_id, 4990)
+
+
 def test_payment_service_rejects_free_license() -> None:
     repository = InMemoryPaymentRepository()
     service = PaymentService(repository, SandboxPixGateway(repository))
