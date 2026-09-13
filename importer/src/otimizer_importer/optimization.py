@@ -179,31 +179,28 @@ def _two_opt(order, problem: OptimizationProblem):
             )
             reverse_missing[index + 1] = reverse_missing[index] + (reverse is None)
 
+        # end stops before the final route position so the fixed endpoint
+        # semantics (destination or return-to-start) remain unchanged.
         for start in range(1, size - 1):
-            for end in range(start + 1, size):
-                # Existing boundary arcs are start-1 -> start and end -> end+1.
-                old_boundary = (0.0, 0.0)
-                new_boundary = (0.0, 0.0)
-
+            for end in range(start + 1, size - 1):
                 left_old = problem.matrix[current[start - 1]][current[start]]
-                right_old = problem.matrix[current[end]][current[end + 1]] if end + 1 < size else None
+                right_old = problem.matrix[current[end]][current[end + 1]]
                 left_new = problem.matrix[current[start - 1]][current[end]]
-                right_new = problem.matrix[current[start]][current[end + 1]] if end + 1 < size else None
+                right_new = problem.matrix[current[start]][current[end + 1]]
 
-                if left_old is None or left_new is None:
+                if left_old is None or right_old is None or left_new is None or right_new is None:
                     continue
-                old_boundary = _add_cost(old_boundary, _metric_cost(left_old, problem.objective))
-                new_boundary = _add_cost(new_boundary, _metric_cost(left_new, problem.objective))
-
-                if end + 1 < size:
-                    if right_old is None or right_new is None:
-                        continue
-                    old_boundary = _add_cost(old_boundary, _metric_cost(right_old, problem.objective))
-                    new_boundary = _add_cost(new_boundary, _metric_cost(right_new, problem.objective))
-
-                # Internal arcs [start, end) are traversed in reverse after 2-opt.
                 if reverse_missing[end] - reverse_missing[start] > 0:
                     continue
+
+                old_boundary = _add_cost(
+                    _metric_cost(left_old, problem.objective),
+                    _metric_cost(right_old, problem.objective),
+                )
+                new_boundary = _add_cost(
+                    _metric_cost(left_new, problem.objective),
+                    _metric_cost(right_new, problem.objective),
+                )
                 old_internal = _subtract_cost(forward_prefix[end], forward_prefix[start])
                 new_internal = _subtract_cost(reverse_prefix[end], reverse_prefix[start])
                 delta = _add_cost(
