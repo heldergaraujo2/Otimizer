@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+import math
 import os
 from typing import Protocol, Sequence
 from urllib.request import Request, urlopen
@@ -19,6 +20,12 @@ class TravelMetric:
 
     distance_meters: float
     duration_seconds: float
+
+    def __post_init__(self) -> None:
+        if not math.isfinite(self.distance_meters) or self.distance_meters < 0:
+            raise ValueError("distance_meters must be a finite non-negative number")
+        if not math.isfinite(self.duration_seconds) or self.duration_seconds < 0:
+            raise ValueError("duration_seconds must be a finite non-negative number")
 
 
 class RoutingError(RuntimeError):
@@ -137,7 +144,10 @@ def parse_osrm_table(
                 continue
             if not isinstance(distance, (int, float)) or not isinstance(duration, (int, float)):
                 raise RoutingError("Routing matrix contains a non-numeric metric")
-            values.append(TravelMetric(float(distance), float(duration)))
+            try:
+                values.append(TravelMetric(float(distance), float(duration)))
+            except ValueError as exc:
+                raise RoutingError("Routing matrix contains an invalid metric") from exc
         matrix.append(tuple(values))
     return tuple(matrix)
 
