@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Annotated
 
@@ -68,8 +69,6 @@ def _serialize_charge(charge) -> dict:
 
 
 def _serialize_license(license_record, now=None) -> dict:
-    from datetime import datetime, timezone
-
     current = now or datetime.now(timezone.utc)
     return {
         "license_id": license_record.license_id,
@@ -200,8 +199,9 @@ def create_app(
         account = authenticated_account(authorization)
         if license_authorizer is None:
             raise HTTPException(status_code=503, detail="Licensing is not configured")
-        license_repository = license_authorizer.repository
-        license_record = license_repository.get_active_license(account.account_id, __import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+        license_record = license_authorizer.repository.get_active_license(
+            account.account_id, datetime.now(timezone.utc)
+        )
         if license_record is None:
             return {"active": False, "license": None}
         return {"active": True, "license": _serialize_license(license_record)}
