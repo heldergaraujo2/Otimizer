@@ -3,7 +3,19 @@ name: Backend tests
 on:
   push:
     branches: [main]
+    paths:
+      - "importer/**"
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
   pull_request:
+    paths:
+      - "importer/**"
+      - "backend/**"
+      - ".github/workflows/backend-tests.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
 
 jobs:
   test-backend:
