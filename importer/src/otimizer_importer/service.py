@@ -82,19 +82,39 @@ def _validate_route_coverage(
         raise ValueError("Optimized route sequence numbers are not contiguous")
 
 
+def _location_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
+    """Build a conservative key that never conflates different address evidence."""
+    return (
+        evidence.latitude,
+        evidence.longitude,
+        evidence.normalized_address,
+        evidence.number,
+        evidence.quadra,
+        evidence.lote,
+        evidence.zipcode,
+        evidence.neighborhood,
+        evidence.city,
+    )
+
+
 def _resolve_physical_stops(
     physical_stops: list[PhysicalStop],
     provider: LocationDataProvider | None,
 ) -> list[PhysicalStop]:
-    """Apply the strongest available property location while retaining provenance."""
+    """Resolve each delivery once per evidence key and retain the strongest result."""
     if provider is None:
         return physical_stops
 
+    cache: dict[tuple[object, ...], object] = {}
     resolved: list[PhysicalStop] = []
     for stop in physical_stops:
         candidates = []
         for delivery in stop.deliveries:
-            location = provider.resolve(LocationEvidence.from_delivery(delivery))
+            evidence = LocationEvidence.from_delivery(delivery)
+            key = _location_cache_key(evidence)
+            if key not in cache:
+                cache[key] = provider.resolve(evidence)
+            location = cache[key]
             if location is not None:
                 candidates.append(location)
         if not candidates:
