@@ -149,7 +149,8 @@ def test_optimize_maps_inconsistent_routing_matrix_to_bad_gateway():
     client = TestClient(create_app(InconsistentRoutingProvider()))
     response = post_workbook(client, workbook_bytes())
     assert response.status_code == 502
-    assert "routing matrix size" in response.json()["detail"]
+    assert "Routing provider failed" in response.json()["detail"]
+    assert "invalid size" in response.json()["detail"]
 
 
 def test_optimize_maps_unreachable_route_to_unprocessable_entity():
