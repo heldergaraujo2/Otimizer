@@ -181,7 +181,8 @@ def _fetch_osrm_tiled_table(
     """Fill a full matrix using bounded OSRM source/destination tiles."""
     size = len(locations)
     matrix: list[list[TravelMetric | None]] = [[None] * size for _ in range(size)]
-    chunks = _chunks(size, max_locations)
+    chunk_size = max(1, max_locations // 2)
+    chunks = _chunks(size, chunk_size)
 
     for source_chunk in chunks:
         source_indices = list(source_chunk)
