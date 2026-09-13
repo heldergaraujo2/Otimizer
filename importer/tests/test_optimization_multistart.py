@@ -22,34 +22,26 @@ def test_large_origin_route_considers_multiple_start_candidates():
     origin = RouteEndpoint(-16.69, -49.19, "depot")
     size = len(stops)
 
-    # Starting at stop 0 is cheap, but deliberately produces a poor greedy
-    # chain. Starting at stop 6 has a slightly higher origin cost and a much
-    # better complete route. The heuristic must consider both.
     matrix = []
     for row in range(size):
         values = []
         for col in range(size):
-            if row == col:
-                values.append(TravelMetric(0, 0))
-            else:
-                values.append(TravelMetric(1000 + abs(row - col), 1000 + abs(row - col)))
+            values.append(TravelMetric(0, 0) if row == col else TravelMetric(1000 + abs(row - col), 1000 + abs(row - col)))
         matrix.append(values)
 
-    # Make a cheap chain from 6 through every stop, while making the chain from
-    # 0 expensive after its first choice.
+    # One complete low-cost cycle starts at 6. Starting at 0 is slightly
+    # cheaper from the origin but leads greedy construction into an expensive
+    # transition. Multi-start + 2-opt should discover the better basin.
     for left, right in zip(range(6, 12), range(7, 13)):
         matrix[left][right] = TravelMetric(1, 1)
-        matrix[right][left] = TravelMetric(1, 1)
-    matrix[0][1] = TravelMetric(1, 1)
-    matrix[1][0] = TravelMetric(1, 1)
-    matrix[1][2] = TravelMetric(9000, 9000)
-    matrix[6][0] = TravelMetric(1, 1)
-    matrix[6][1] = TravelMetric(1, 1)
-    matrix[6][2] = TravelMetric(1, 1)
-    matrix[6][3] = TravelMetric(1, 1)
-    matrix[6][4] = TravelMetric(1, 1)
-    matrix[6][5] = TravelMetric(1, 1)
-    origin_metrics = tuple(TravelMetric(1 if index == 0 else 2, 1 if index == 0 else 2) for index in range(size))
+    for left, right in zip(range(0, 5), range(1, 6)):
+        matrix[left][right] = TravelMetric(1, 1)
+    matrix[12][0] = TravelMetric(1, 1)
+
+    origin_metrics = tuple(
+        TravelMetric(1 if index == 0 else 2, 1 if index == 0 else 2)
+        for index in range(size)
+    )
 
     problem = OptimizationProblem(
         stops=stops,
