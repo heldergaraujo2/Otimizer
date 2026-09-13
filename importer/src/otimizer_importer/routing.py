@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 import json
+from typing import Protocol, Sequence
 from urllib.parse import quote
 from urllib.request import Request, urlopen
 
@@ -27,7 +28,26 @@ class RoutingError(RuntimeError):
     """Raised when the routing provider cannot produce a road-network result."""
 
 
-def _coordinates(locations: list[PhysicalStop | RouteEndpoint]) -> str:
+class RoutingProvider(Protocol):
+    """Interface implemented by road-network routing providers."""
+
+    def table(
+        self, locations: Sequence[PhysicalStop | RouteEndpoint]
+    ) -> tuple[tuple[TravelMetric | None, ...], ...]: ...
+
+
+class OSRMRoutingProvider:
+    """Routing provider backed by the OSRM Table API."""
+
+    def __init__(self, *, timeout_seconds: float = 15.0, base_url: str = "https://router.project-osrm.org") -> None:
+        self.timeout_seconds = timeout_seconds
+        self.base_url = base_url
+
+    def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
+        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url)
+
+
+def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
     return ";".join(f"{location.longitude},{location.latitude}" for location in locations)
 
 
@@ -88,13 +108,9 @@ def build_route_matrix(
     origin: RouteEndpoint | None = None,
     destination: RouteEndpoint | None = None,
     *,
-    provider=None,
+    provider: RoutingProvider | None = None,
 ) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Build one matrix ordered as optional origin, stops, optional destination.
-
-    ``provider`` can be any object implementing ``RoutingProvider.table``.
-    When omitted, the legacy direct OSRM implementation is used.
-    """
+    """Build one matrix ordered as optional origin, stops, optional destination."""
     locations: list[PhysicalStop | RouteEndpoint] = []
     if origin is not None:
         locations.append(origin)
@@ -102,5 +118,5 @@ def build_route_matrix(
     if destination is not None:
         locations.append(destination)
     if provider is None:
-        return fetch_osrm_table(locations)
+        provider = OSRMRoutingProvider()
     return provider.table(locations)
