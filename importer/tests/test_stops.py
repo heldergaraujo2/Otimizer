@@ -8,6 +8,8 @@ def delivery(
     lon: float,
     source_stop: str,
     address: str | None = None,
+    quadra: str | None = None,
+    lote: str | None = None,
 ) -> Delivery:
     return Delivery(
         row_number=row,
@@ -21,6 +23,8 @@ def delivery(
         zipcode=None,
         latitude=lat,
         longitude=lon,
+        quadra=quadra,
+        lote=lote,
     )
 
 
@@ -86,6 +90,41 @@ def test_different_addresses_nearby_stay_separate():
     deliveries = [
         delivery(2, -16.686900, -49.264800, "1", "Rua das Flores, 100"),
         delivery(3, -16.686905, -49.264805, "2", "Rua das Flores, 102"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 2
+
+
+def test_different_lotes_at_same_coordinate_stay_separate():
+    deliveries = [
+        delivery(2, -16.6869, -49.2648, "1", "Rua das Flores, 100", "A", "10"),
+        delivery(3, -16.6869, -49.2648, "2", "Rua das Flores, 100", "A", "11"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 2
+    assert [stop.delivery_count for stop in stops] == [1, 1]
+
+
+def test_same_quadra_and_lote_with_gps_jitter_groups_deliveries():
+    deliveries = [
+        delivery(2, -16.686900, -49.264800, "1", None, "Q-7", "L-12"),
+        delivery(3, -16.686940, -49.264820, "2", None, " q 7 ", " l 12 "),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 1
+    assert stops[0].delivery_count == 2
+
+
+def test_different_quadra_stays_separate_even_with_same_address_and_nearby_gps():
+    deliveries = [
+        delivery(2, -16.686900, -49.264800, "1", "Rua das Flores, 100", "A", "10"),
+        delivery(3, -16.686905, -49.264805, "2", "Rua das Flores, 100", "B", "10"),
     ]
 
     stops = group_physical_stops(deliveries)
