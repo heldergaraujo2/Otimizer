@@ -28,13 +28,13 @@ class FakeRoutingProvider:
         )
 
 
-def workbook_bytes(count: int, *, duplicate_group_size: int = 1) -> bytes:
+def workbook_bytes(count: int, *, physical_stop_count: int) -> bytes:
     workbook = Workbook()
     sheet = workbook.active
     sheet.append(HEADERS)
 
     for index in range(count):
-        group = index // duplicate_group_size
+        group = min(index, physical_stop_count - 1)
         latitude = -16.70 + (group // 10) * 0.001
         longitude = -49.25 + (group % 10) * 0.001
         sequence = "-" if index % 11 == 0 else index + 1
@@ -72,7 +72,10 @@ def test_optimize_endpoint_preserves_realistic_scale_cases():
             files={
                 "file": (
                     f"scale_{delivery_count}.xlsx",
-                    workbook_bytes(delivery_count, duplicate_group_size=2),
+                    workbook_bytes(
+                        delivery_count,
+                        physical_stop_count=expected_stop_count,
+                    ),
                     "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                 )
             },
@@ -94,7 +97,11 @@ def test_optimize_endpoint_preserves_realistic_scale_cases():
             range(1, expected_stop_count + 1)
         )
         assert sum(stop["delivery_count"] for stop in route) == delivery_count
-        assert len({delivery["tracking_number"] for stop in route for delivery in stop["deliveries"]}) == delivery_count
+        assert len({
+            delivery["tracking_number"]
+            for stop in route
+            for delivery in stop["deliveries"]
+        }) == delivery_count
 
 
 def test_optimize_endpoint_preserves_many_deliveries_at_one_physical_stop():
@@ -104,7 +111,7 @@ def test_optimize_endpoint_preserves_many_deliveries_at_one_physical_stop():
         files={
             "file": (
                 "single_stop_37.xlsx",
-                workbook_bytes(37, duplicate_group_size=37),
+                workbook_bytes(37, physical_stop_count=1),
                 "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             )
         },
@@ -112,16 +119,14 @@ def test_optimize_endpoint_preserves_many_deliveries_at_one_physical_stop():
 
     assert response.status_code == 200, response.text
     payload = response.json()
+    summary = payload["summary"]
 
-    assert payload["summary"] == {
-        **payload["summary"],
-        "eligible_deliveries": 37,
-        "routed_deliveries": 37,
-        "physical_stops": 1,
-        "routed_stops": 1,
-        "pending": 0,
-        "coverage_complete": True,
-    }
+    assert summary["eligible_deliveries"] == 37
+    assert summary["routed_deliveries"] == 37
+    assert summary["physical_stops"] == 1
+    assert summary["routed_stops"] == 1
+    assert summary["pending"] == 0
+    assert summary["coverage_complete"] is True
     assert payload["route"][0]["sequence"] == 1
     assert payload["route"][0]["delivery_count"] == 37
     assert len(payload["route"][0]["deliveries"]) == 37
