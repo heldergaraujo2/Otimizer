@@ -1,3 +1,4 @@
+from .address_parser import ParsedAddress, normalize_address, parse_address
 from .metrics import RouteLeg, RouteMetrics, calculate_route_metrics
 from .models import Delivery, ImportResult, OptimizedRouteStop, PhysicalStop, Route
 from .optimization import OptimizationObjective, OptimizationProblem, OptimizationResult, RouteEndpoint, optimize
@@ -16,6 +17,7 @@ from .service import OptimizationServiceResult, optimize_deliveries_file
 from .xlsx import import_deliveries, import_result
 
 __all__ = [
+    "ParsedAddress", "normalize_address", "parse_address",
     "Delivery", "ImportResult", "OptimizedRouteStop", "PhysicalStop", "Route",
     "OptimizationError", "OptimizationObjective", "OptimizationProblem", "OptimizationResult", "RouteEndpoint",
     "RoutingError", "RoutingProvider", "OSRMRoutingProvider", "TravelMetric",
