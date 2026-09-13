@@ -41,18 +41,16 @@ def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str 
     )
 
 
-def _compatible_location(first: Delivery, second: Delivery) -> bool:
-    """Reject merges when known property/address fields contradict each other."""
-    first_evidence = _location_evidence(first)
-    second_evidence = _location_evidence(second)
-    for left, right in zip(first_evidence, second_evidence):
+def _property_compatible(first: Delivery, second: Delivery) -> bool:
+    """Reject a merge when known Quadra/Lote values contradict."""
+    for left, right in zip(_location_evidence(first)[1:], _location_evidence(second)[1:]):
         if left is not None and right is not None and left != right:
             return False
     return True
 
 
 def _has_shared_strong_evidence(first: Delivery, second: Delivery) -> bool:
-    """Return whether the pair shares an explicit location identity signal."""
+    """Return whether the pair shares an explicit address/property identity."""
     first_evidence = _location_evidence(first)
     second_evidence = _location_evidence(second)
     return any(
@@ -79,11 +77,11 @@ def group_physical_stops(
 ) -> list[PhysicalStop]:
     """Group deliveries into physical stops without using source Stop/Sequence.
 
-    Exact coordinate groups are merged only when their known address/Quadra/
-    Lote evidence is mutually compatible. Distinct coordinates can be merged
-    for GPS jitter when they share strong location evidence and are within
-    ``address_tolerance_meters``. Missing optional evidence never invalidates a
-    delivery; contradictory known evidence prevents an unsafe merge.
+    Identical coordinates remain one physical location by default, preserving
+    the delivery-domain rule. If known Quadra/Lote values conflict, the rows
+    are kept in separate physical stops so one GPS point cannot erase distinct
+    properties. Distinct coordinates can be reconciled for GPS jitter when
+    address/Quadra/Lote evidence agrees and the distance is within tolerance.
     """
     if address_tolerance_meters < 0:
         raise ValueError("address_tolerance_meters cannot be negative")
@@ -93,19 +91,16 @@ def group_physical_stops(
         grouped[coordinate_key(delivery.latitude, delivery.longitude)].append(delivery)
 
     stops: list[PhysicalStop] = []
-    address_groups: dict[tuple[str | None, str | None, str | None], list[PhysicalStop]] = defaultdict(list)
 
-    for index, ((latitude, longitude), members) in enumerate(grouped.items(), start=1):
-        # An identical GPS coordinate is not sufficient to merge contradictory
-        # property identities (for example different lots at one geocoded point).
-        compatible_members: list[Delivery] = []
+    for latitude, longitude in grouped:
+        members = grouped[(latitude, longitude)]
         split_members: list[list[Delivery]] = []
         for member in members:
             target = next(
                 (
                     existing
                     for existing in split_members
-                    if all(_compatible_location(member, candidate) for candidate in existing)
+                    if all(_property_compatible(member, candidate) for candidate in existing)
                 ),
                 None,
             )
@@ -115,20 +110,18 @@ def group_physical_stops(
             target.append(member)
 
         for member_group in split_members:
-            stop = PhysicalStop(
-                id=f"stop-{len(stops) + 1:04d}",
-                latitude=latitude,
-                longitude=longitude,
-                deliveries=member_group,
+            stops.append(
+                PhysicalStop(
+                    id=f"stop-{len(stops) + 1:04d}",
+                    latitude=latitude,
+                    longitude=longitude,
+                    deliveries=member_group,
+                )
             )
-            stops.append(stop)
 
-            for delivery in member_group:
-                evidence = _location_evidence(delivery)
-                if _has_shared_strong_evidence(delivery, member_group[0]):
-                    address_groups[evidence].append(stop)
-
-    # Reconcile neighboring GPS points when the property identity agrees.
+    # Reconcile neighboring GPS points only when explicit location evidence
+    # agrees. This is deliberately conservative: proximity alone never merges
+    # two unrelated addresses.
     reconciled: list[PhysicalStop] = []
     for stop in stops:
         representative = stop.deliveries[0]
@@ -138,7 +131,7 @@ def group_physical_stops(
                 for candidate in reconciled
                 if _distance_meters(representative, candidate.deliveries[0]) <= address_tolerance_meters
                 and _has_shared_strong_evidence(representative, candidate.deliveries[0])
-                and _compatible_location(representative, candidate.deliveries[0])
+                and _property_compatible(representative, candidate.deliveries[0])
             ),
             None,
         )
