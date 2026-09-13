@@ -1,8 +1,10 @@
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from otimizer_api.accounts import Account, Session
 from otimizer_api.licensing import Entitlements, License
-from otimizer_api.payments import PaymentStatus, PixCharge
+from otimizer_api.payments import PaymentService, PaymentStatus, PixCharge, SandboxPixGateway
 from otimizer_api.persistence import (
     SQLiteAccountRepository,
     SQLiteDatabase,
@@ -70,3 +72,64 @@ def test_payment_repository_persists_amount_status_and_license_binding(tmp_path)
     settled = PixCharge(**{**charge.__dict__, "status": PaymentStatus.SETTLED})
     repository.save(settled)
     assert repository.get("payment-1") == settled
+
+
+def _seed_sqlite_payment(tmp_path, price_cents=2990):
+    database = SQLiteDatabase(tmp_path / "settlement.db")
+    SQLiteAccountRepository(database).save(Account("acct-1", "user@example.com", "hash"))
+    starts = datetime(2026, 9, 1, tzinfo=timezone.utc)
+    license_record = License("license-1", "acct-1", starts, starts + timedelta(days=30), price_cents=price_cents)
+    licenses = SQLiteLicenseRepository(database)
+    licenses.save(license_record)
+    payments = SQLitePaymentRepository(database)
+    gateway = SandboxPixGateway(payments)
+    service = PaymentService(payments, gateway, licenses)
+    return database, licenses, payments, gateway, service, license_record
+
+
+def test_sqlite_settlement_updates_payment_and_license_atomically(tmp_path):
+    _, licenses, payments, gateway, service, license_record = _seed_sqlite_payment(tmp_path)
+    charge = service.create_license_charge(license_record)
+    gateway.confirm_sandbox_charge(charge.payment_id)
+    now = datetime(2026, 9, 13, 12, tzinfo=timezone.utc)
+
+    activated = service.settle_confirmed_payment(charge.payment_id, now=now)
+
+    assert activated.expires_at == now + timedelta(days=30)
+    assert licenses.get_by_id("license-1") == activated
+    settled = payments.get(charge.payment_id)
+    assert settled is not None
+    assert settled.status is PaymentStatus.SETTLED
+
+
+def test_sqlite_settlement_is_idempotent_and_does_not_extend_twice(tmp_path):
+    _, licenses, payments, gateway, service, license_record = _seed_sqlite_payment(tmp_path)
+    charge = service.create_license_charge(license_record)
+    gateway.confirm_sandbox_charge(charge.payment_id)
+    now = datetime(2026, 9, 13, 12, tzinfo=timezone.utc)
+
+    first = service.settle_confirmed_payment(charge.payment_id, now=now)
+    second = service.settle_confirmed_payment(charge.payment_id, now=now + timedelta(days=1))
+
+    assert second == first
+    assert licenses.get_by_id("license-1") == first
+    assert payments.get(charge.payment_id).status is PaymentStatus.SETTLED
+
+
+def test_sqlite_settlement_uses_charge_price_snapshot_after_license_price_change(tmp_path):
+    _, licenses, payments, gateway, service, license_record = _seed_sqlite_payment(tmp_path, 2990)
+    charge = service.create_license_charge(license_record)
+    gateway.confirm_sandbox_charge(charge.payment_id)
+    licenses.save(license_record.change_price(4990))
+
+    activated = service.settle_confirmed_payment(charge.payment_id, now=datetime(2026, 9, 13, 12, tzinfo=timezone.utc))
+
+    assert activated.price_cents == 4990
+    assert payments.get(charge.payment_id).status is PaymentStatus.SETTLED
+
+
+def test_sqlite_settlement_rejects_unconfirmed_payment(tmp_path):
+    _, _, _, _, service, license_record = _seed_sqlite_payment(tmp_path)
+    charge = service.create_license_charge(license_record)
+    with pytest.raises(ValueError, match="not confirmed"):
+        service.settle_confirmed_payment(charge.payment_id)
