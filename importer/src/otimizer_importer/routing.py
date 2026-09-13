@@ -158,7 +158,7 @@ def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, ti
     """Fill a full matrix with bounded, concurrently fetched OSRM tiles."""
     size = len(locations)
     matrix: list[list[TravelMetric | None]] = [[None] * size for _ in range(size)]
-    chunk_size = max(1, max_locations // 2)
+    chunk_size = max(1, (max_locations + 1) // 2)
     chunks = _chunks(size, chunk_size)
 
     def fetch_tile(source_chunk: range, destination_chunk: range):
