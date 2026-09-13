@@ -5,10 +5,10 @@ from pathlib import Path
 from typing import Annotated
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi.middleware.cors import CORSMiddleware
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
 from otimizer_importer.routing import RoutingProvider
-
 
 app = FastAPI(title="Otimizer API", version="0.1.0")
 
@@ -75,6 +75,13 @@ def _serialize(result) -> dict:
 
 def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
+    api.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:3000", "http://localhost:5173"],
+        allow_credentials=False,
+        allow_methods=["GET", "POST"],
+        allow_headers=["Content-Type"],
+    )
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -92,30 +99,23 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
     ) -> dict:
         if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
             raise HTTPException(status_code=422, detail="The uploaded file must be an .xlsx workbook")
-
         origin = _endpoint(origin_latitude, origin_longitude, "origin")
         destination = _endpoint(destination_latitude, destination_longitude, "destination")
         if destination is not None and return_to_start:
             raise HTTPException(status_code=422, detail="destination and return_to_start cannot be combined")
-
         contents = await file.read()
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as temporary:
             temporary.write(contents)
             temporary_path = Path(temporary.name)
         try:
             result = optimize_deliveries_file(
-                str(temporary_path),
-                routing_provider=routing_provider,
-                origin=origin,
-                destination=destination,
-                return_to_start=return_to_start,
-                objective=objective,
+                str(temporary_path), routing_provider=routing_provider, origin=origin,
+                destination=destination, return_to_start=return_to_start, objective=objective,
             )
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
             temporary_path.unlink(missing_ok=True)
-
         return _serialize(result)
 
     return api
