@@ -1,4 +1,4 @@
-"""Durable SQLite repositories for Otimizer account, session and license state."""
+"""Durable SQLite repositories for Otimizer account, session, license and payment state."""
 
 from __future__ import annotations
 
@@ -9,6 +9,7 @@ from pathlib import Path
 from .accounts import Account, AccountRepository, Session, SessionRepository
 from .auth import AuthenticationService
 from .licensing import Entitlements, License, LicenseAuthorizer, LicenseRepository
+from .payments import PaymentRepository, PaymentStatus, PixCharge
 
 
 class SQLiteDatabase:
@@ -59,6 +60,18 @@ class SQLiteDatabase:
                 );
                 CREATE INDEX IF NOT EXISTS idx_licenses_account_dates
                     ON licenses(account_id, starts_at, expires_at);
+
+                CREATE TABLE IF NOT EXISTS payments (
+                    payment_id TEXT PRIMARY KEY,
+                    account_id TEXT NOT NULL REFERENCES accounts(account_id),
+                    license_id TEXT NOT NULL REFERENCES licenses(license_id),
+                    amount_cents INTEGER NOT NULL,
+                    expires_at TEXT NOT NULL,
+                    pix_copy_paste TEXT NOT NULL,
+                    status TEXT NOT NULL
+                );
+                CREATE INDEX IF NOT EXISTS idx_payments_account ON payments(account_id);
+                CREATE INDEX IF NOT EXISTS idx_payments_license ON payments(license_id);
                 """
             )
             columns = {row["name"] for row in connection.execute("PRAGMA table_info(licenses)")}
@@ -183,6 +196,53 @@ class SQLiteLicenseRepository(LicenseRepository):
         return _license_from_row(row)
 
 
+class SQLitePaymentRepository(PaymentRepository):
+    """Durable payment store; amount and status are persisted independently."""
+
+    def __init__(self, database: SQLiteDatabase) -> None:
+        self.database = database
+
+    def save(self, charge: PixCharge) -> None:
+        if not charge.license_id:
+            raise ValueError("payment must be bound to a license")
+        if charge.amount_cents <= 0:
+            raise ValueError("payment amount must be positive")
+        with self.database.connect() as connection:
+            connection.execute(
+                """
+                INSERT INTO payments(
+                    payment_id, account_id, license_id, amount_cents,
+                    expires_at, pix_copy_paste, status
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(payment_id) DO UPDATE SET
+                    account_id=excluded.account_id, license_id=excluded.license_id,
+                    amount_cents=excluded.amount_cents, expires_at=excluded.expires_at,
+                    pix_copy_paste=excluded.pix_copy_paste, status=excluded.status
+                """,
+                (
+                    charge.payment_id,
+                    charge.account_id,
+                    charge.license_id,
+                    charge.amount_cents,
+                    _iso(charge.expires_at),
+                    charge.pix_copy_paste,
+                    charge.status.value,
+                ),
+            )
+
+    def get(self, payment_id: str) -> PixCharge | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT payment_id, account_id, license_id, amount_cents,
+                       expires_at, pix_copy_paste, status
+                FROM payments WHERE payment_id = ?
+                """,
+                (payment_id,),
+            ).fetchone()
+        return _payment_from_row(row)
+
+
 def build_sqlite_services(path: str | Path) -> tuple[SQLiteDatabase, AuthenticationService, LicenseAuthorizer]:
     """Build the durable authentication/licensing stack for one backend instance."""
     database = SQLiteDatabase(path)
@@ -220,6 +280,16 @@ def _license_from_row(row: sqlite3.Row | None) -> License | None:
         ),
         revoked_at=_parse_datetime(row["revoked_at"]) if row["revoked_at"] else None,
         price_cents=int(row["price_cents"]),
+    )
+
+
+def _payment_from_row(row: sqlite3.Row | None) -> PixCharge | None:
+    if row is None:
+        return None
+    return PixCharge(
+        payment_id=row["payment_id"], account_id=row["account_id"], license_id=row["license_id"],
+        amount_cents=int(row["amount_cents"]), expires_at=_parse_datetime(row["expires_at"]),
+        pix_copy_paste=row["pix_copy_paste"], status=PaymentStatus(row["status"]),
     )
 
 
