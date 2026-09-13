@@ -30,12 +30,23 @@ class PhysicalStop:
     latitude: float
     longitude: float
     deliveries: list[Delivery] = field(default_factory=list)
+    location_confidence: float | None = None
+    location_source: str | None = None
+    property_latitude: float | None = None
+    property_longitude: float | None = None
+    access_latitude: float | None = None
+    access_longitude: float | None = None
+    cadastral_id: str | None = None
 
     def __post_init__(self) -> None:
         if not self.id:
             raise ValueError("PhysicalStop.id cannot be empty")
         if not self.deliveries:
             raise ValueError("PhysicalStop must contain at least one delivery")
+        if self.location_confidence is not None and not 0.0 <= self.location_confidence <= 1.0:
+            raise ValueError("PhysicalStop location confidence must be between 0 and 1")
+        if (self.location_confidence is None) != (self.location_source is None):
+            raise ValueError("PhysicalStop location confidence and source must be provided together")
 
     @property
     def delivery_count(self) -> int:
