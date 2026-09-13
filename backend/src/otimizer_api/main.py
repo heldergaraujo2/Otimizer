@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import tempfile
 from pathlib import Path
 from typing import Annotated
@@ -8,9 +9,29 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
-from otimizer_importer.routing import RoutingProvider
+from otimizer_importer.routing import RoutingError, RoutingProvider
 
-app = FastAPI(title="Otimizer API", version="0.1.0")
+DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
+
+
+def _max_upload_bytes() -> int:
+    raw = os.getenv("OTIMIZER_MAX_UPLOAD_BYTES")
+    if raw is None:
+        return DEFAULT_MAX_UPLOAD_BYTES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_MAX_UPLOAD_BYTES
+    return max(1, value)
+
+
+def _cors_origins() -> list[str]:
+    raw = os.getenv("OTIMIZER_CORS_ORIGINS")
+    if raw:
+        origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
+        if origins:
+            return origins
+    return ["http://localhost:3000", "http://localhost:5173"]
 
 
 def _endpoint(latitude: float | None, longitude: float | None, name: str) -> RouteEndpoint | None:
@@ -77,7 +98,7 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
     api = FastAPI(title="Otimizer API", version="0.1.0")
     api.add_middleware(
         CORSMiddleware,
-        allow_origins=["http://localhost:3000", "http://localhost:5173"],
+        allow_origins=_cors_origins(),
         allow_credentials=False,
         allow_methods=["GET", "POST"],
         allow_headers=["Content-Type"],
@@ -103,7 +124,12 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
         destination = _endpoint(destination_latitude, destination_longitude, "destination")
         if destination is not None and return_to_start:
             raise HTTPException(status_code=422, detail="destination and return_to_start cannot be combined")
-        contents = await file.read()
+
+        max_bytes = _max_upload_bytes()
+        contents = await file.read(max_bytes + 1)
+        if len(contents) > max_bytes:
+            raise HTTPException(status_code=413, detail=f"Uploaded file exceeds the {max_bytes} byte limit")
+
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as temporary:
             temporary.write(contents)
             temporary_path = Path(temporary.name)
@@ -112,6 +138,8 @@ def create_app(routing_provider: RoutingProvider | None = None) -> FastAPI:
                 str(temporary_path), routing_provider=routing_provider, origin=origin,
                 destination=destination, return_to_start=return_to_start, objective=objective,
             )
+        except RoutingError as exc:
+            raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc
         except (ValueError, OSError) as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         finally:
