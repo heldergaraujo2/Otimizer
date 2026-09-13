@@ -86,7 +86,7 @@ def _resolve_physical_stops(
     physical_stops: list[PhysicalStop],
     provider: LocationDataProvider | None,
 ) -> list[PhysicalStop]:
-    """Apply the strongest available property location without losing XLSX GPS."""
+    """Apply the strongest available property location while retaining provenance."""
     if provider is None:
         return physical_stops
 
@@ -101,7 +101,20 @@ def _resolve_physical_stops(
             resolved.append(stop)
             continue
         best = max(candidates, key=lambda location: location.confidence)
-        resolved.append(replace(stop, latitude=best.latitude, longitude=best.longitude))
+        resolved.append(
+            replace(
+                stop,
+                latitude=best.latitude,
+                longitude=best.longitude,
+                location_confidence=best.confidence,
+                location_source=best.source,
+                property_latitude=best.property_latitude,
+                property_longitude=best.property_longitude,
+                access_latitude=best.access_latitude,
+                access_longitude=best.access_longitude,
+                cadastral_id=best.cadastral_id,
+            )
+        )
     return resolved
 
 
