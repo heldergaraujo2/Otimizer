@@ -6,33 +6,37 @@ A integração de escrita com o repositório GitHub `heldergaraujo2/Otimizer` es
 
 ## Fase
 
-Fundação do domínio, importador e primeira camada de roteamento/otimização.
+Fundação do domínio, importação XLSX, roteamento rodoviário, otimização configurável e resultado de rota.
 
 ## Concluído
 
-- README inicial.
-- Requisitos funcionais.
-- Arquitetura inicial.
-- Especificação do XLSX.
-- Identidade e visão do projeto.
-- Importador XLSX com elegibilidade por latitude/longitude.
+- README inicial, requisitos, arquitetura e especificação do XLSX.
+- Importador XLSX com elegibilidade por latitude/longitude e auditoria das linhas não resolvidas.
 - Reconstrução inicial de PhysicalStop independente de `Sequence`/`Stop`.
-- Modelo explícito de `OptimizedRouteStop` e `Route` com invariantes de cobertura estrutural.
-- Resultado estruturado de importação com auditoria de todas as linhas de dados.
-- Testes de integridade do resultado da importação.
-- Fixtures anonimizados de regressão baseados nos casos reais.
-- Camada de integração com OSRM Table para matriz de distância/tempo por rede viária, preservando pares inalcançáveis.
-- Primeiro otimizador determinístico por vizinho mais próximo, usando tempo de viagem rodoviária como custo primário e cobrindo todos os PhysicalStops.
-- Agregação de métricas de rota (distância e duração), incluindo opcionalmente a perna de retorno.
-- Exportação pública das APIs de importação, roteamento, otimização e métricas.
+- Modelos explícitos de Delivery, PhysicalStop, OptimizedRouteStop e Route com invariantes de cobertura.
+- Fixtures anonimizados e testes de regressão baseados nos casos reais, sem armazenar dados pessoais das planilhas.
+- Integração com OSRM Table para matriz de distância/tempo por rede viária, preservando pares inalcançáveis.
+- Otimizador determinístico por vizinho mais próximo e interface configurável de problema.
+- Objetivos de otimização por tempo ou distância.
+- Suporte a origem/depot, destino opcional, rota aberta e retorno à origem quando não há origem externa.
+- Matriz de roteamento consciente dos endpoints e validação de rotas completas.
+- Serviço de aplicação que executa XLSX -> PhysicalStops -> matriz rodoviária -> otimização.
+- Resultado de serviço com contagem de entregas, paradas físicas, paradas roteadas, pendências e indicador de cobertura completa.
+- Resultado de métricas com pernas individuais, distância total e duração total.
+- Pernas opcionais de origem -> primeira parada, última parada -> destino e retorno à origem.
+- Métricas calculadas exclusivamente a partir da mesma matriz rodoviária usada na otimização.
+- Testes automatizados para importação, agrupamento, roteamento, otimização, endpoints, métricas e cobertura ponta a ponta.
+- GitHub Actions configurado para executar a suíte do importer.
 
 ## Estado de testes
 
-Os testes automatizados foram adicionados para importação, agrupamento, roteamento, otimização e métricas. A execução local não foi possível neste ambiente porque o clone por rede do GitHub não conseguiu resolver `github.com`; portanto, não há afirmação de que a suíte foi executada localmente.
+O último pipeline confirmado antes da evolução do resultado foi bem-sucedido. As alterações de resultado/métricas foram versionadas em commits separados; o próximo passo é confirmar o novo pipeline e corrigir qualquer regressão encontrada por ele.
 
 ## Próxima etapa
 
-Evoluir o otimizador para uma interface de problema configurável, separando origem/depot, destino opcional, rota aberta/fechada e objetivo (tempo ou distância). Depois disso, avaliar um solver de otimização mais forte (por exemplo, OR-Tools) sobre a mesma matriz rodoviária, mantendo o algoritmo guloso como baseline determinístico.
+Após CI verde, construir uma API HTTP fina sobre o serviço, mantendo o domínio independente do framework. A API deverá aceitar o XLSX e parâmetros de rota e devolver um contrato estável, pronto para o frontend, contendo resumo, paradas numeradas, entregas por parada, pernas e métricas.
+
+Depois disso, iniciar o frontend/mapa e a navegação, e posteriormente avaliar um solver mais forte (como OR-Tools) sobre a mesma matriz rodoviária.
 
 ## Regra de continuidade
 
