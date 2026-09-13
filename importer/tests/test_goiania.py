@@ -132,3 +132,47 @@ def test_provider_falls_back_to_cadastral_lot_without_number_match(monkeypatch):
     assert resolved.confidence == 0.80
     assert resolved.property_latitude == resolved.latitude
     assert resolved.property_longitude == resolved.longitude
+
+
+def test_provider_caches_resolution_for_identical_evidence(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    calls = {"official": 0, "street": 0}
+
+    def query_official_numbers(evidence):
+        calls["official"] += 1
+        return [
+            {
+                "attributes": {"id": "NPO-123", "nm_npo": "123"},
+                "geometry": {"x": -49.251, "y": -16.681},
+            }
+        ]
+
+    def query_street_segments(latitude, longitude):
+        calls["street"] += 1
+        return []
+
+    monkeypatch.setattr(provider, "_query_official_numbers", query_official_numbers)
+    monkeypatch.setattr(provider, "_query_street_segments", query_street_segments)
+
+    first = provider.resolve(evidence())
+    second = provider.resolve(evidence())
+
+    assert first == second
+    assert calls == {"official": 1, "street": 1}
+
+
+def test_provider_cache_key_keeps_distinct_address_evidence_separate(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    calls = []
+
+    def query_official_numbers(current_evidence):
+        calls.append(current_evidence.number)
+        return []
+
+    monkeypatch.setattr(provider, "_query_official_numbers", query_official_numbers)
+    monkeypatch.setattr(provider, "_query_lots", lambda current_evidence: [])
+
+    assert provider.resolve(evidence(number="123")) is None
+    assert provider.resolve(evidence(number="125")) is None
+    assert provider.resolve(evidence(number="123")) is None
+    assert calls == ["123", "125"]
