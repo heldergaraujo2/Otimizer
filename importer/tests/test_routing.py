@@ -109,7 +109,7 @@ def test_fetch_osrm_table_reports_failed_tile_coordinates(monkeypatch):
         return tuple(tuple(TravelMetric(0.0, 0.0) for _ in range(size)) for _ in range(size))
 
     monkeypatch.setattr(routing, "_fetch_osrm_request", fail_first_tile)
-    with pytest.raises(RoutingError, match=r"OSRM tile failed .*sources 0:1.*destinations 0:1"):
+    with pytest.raises(RoutingError, match=r"OSRM tile failed .*sources 1:2.*destinations 1:2"):
         routing.fetch_osrm_table(locations, max_locations=3, max_concurrent_requests=1)
 
 
