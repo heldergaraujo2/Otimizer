@@ -142,7 +142,7 @@ def _order_cost(order, problem: OptimizationProblem):
 
 
 def _two_opt(order, problem: OptimizationProblem):
-    """Improve a complete route while preserving its first and last endpoints.
+    """Improve a complete route while preserving required endpoints.
 
     Candidate scores are updated by delta instead of rescanning the complete
     route. For directed road costs, reversing a segment also reverses every
@@ -160,9 +160,6 @@ def _two_opt(order, problem: OptimizationProblem):
         best_order = current
         best_cost = current_cost
         size = len(current)
-
-        # forward_prefix[i] is the cost of arcs [0, i), while reverse_prefix[i]
-        # is the cost of the opposite arcs for those same adjacent positions.
         forward_prefix = [(0.0, 0.0)] * size
         reverse_prefix = [(0.0, 0.0)] * size
         reverse_missing = [0] * size
@@ -179,34 +176,53 @@ def _two_opt(order, problem: OptimizationProblem):
             )
             reverse_missing[index + 1] = reverse_missing[index] + (reverse is None)
 
-        # end stops before the final route position so the fixed endpoint
-        # semantics (destination or return-to-start) remain unchanged.
-        for start in range(1, size - 1):
-            for end in range(start + 1, size - 1):
+        # A destination endpoint is fixed, so the final stop cannot move. An
+        # open route may move its final stop, and a return-to-start route may
+        # also move it because the return arc is part of the candidate cost.
+        final_end = size - 2 if problem.destination_metrics is not None else size - 1
+        for start in range(1, max(1, final_end)):
+            for end in range(start + 1, final_end + 1):
                 left_old = problem.matrix[current[start - 1]][current[start]]
-                right_old = problem.matrix[current[end]][current[end + 1]]
                 left_new = problem.matrix[current[start - 1]][current[end]]
-                right_new = problem.matrix[current[start]][current[end + 1]]
-
-                if left_old is None or right_old is None or left_new is None or right_new is None:
+                if left_old is None or left_new is None:
                     continue
                 if reverse_missing[end] - reverse_missing[start] > 0:
                     continue
 
-                old_boundary = _add_cost(
-                    _metric_cost(left_old, problem.objective),
-                    _metric_cost(right_old, problem.objective),
-                )
-                new_boundary = _add_cost(
-                    _metric_cost(left_new, problem.objective),
-                    _metric_cost(right_new, problem.objective),
-                )
+                old_boundary = _metric_cost(left_old, problem.objective)
+                new_boundary = _metric_cost(left_new, problem.objective)
                 old_internal = _subtract_cost(forward_prefix[end], forward_prefix[start])
                 new_internal = _subtract_cost(reverse_prefix[end], reverse_prefix[start])
                 delta = _add_cost(
                     _subtract_cost(new_boundary, old_boundary),
                     _subtract_cost(new_internal, old_internal),
                 )
+
+                if end < size - 1:
+                    right_old = problem.matrix[current[end]][current[end + 1]]
+                    right_new = problem.matrix[current[start]][current[end + 1]]
+                    if right_old is None or right_new is None:
+                        continue
+                    delta = _add_cost(
+                        delta,
+                        _subtract_cost(
+                            _metric_cost(right_new, problem.objective),
+                            _metric_cost(right_old, problem.objective),
+                        ),
+                    )
+                elif problem.return_to_start:
+                    return_old = problem.matrix[current[end]][current[0]]
+                    return_new = problem.matrix[current[start]][current[0]]
+                    if return_old is None or return_new is None:
+                        continue
+                    delta = _add_cost(
+                        delta,
+                        _subtract_cost(
+                            _metric_cost(return_new, problem.objective),
+                            _metric_cost(return_old, problem.objective),
+                        ),
+                    )
+
                 candidate_cost = _add_cost(current_cost, delta)
                 if candidate_cost < best_cost:
                     best_order = current[:start] + current[start:end + 1][::-1] + current[end + 1:]
