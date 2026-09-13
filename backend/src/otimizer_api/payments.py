@@ -1,9 +1,4 @@
-"""Provider-neutral Pix payment domain with a deterministic sandbox gateway.
-
-The gateway intentionally does not move real money. Production providers can
-implement the same protocol later; payment confirmation must come from the
-provider/backend webhook, never from the browser.
-"""
+"""Provider-neutral Pix payment domain with a deterministic sandbox gateway."""
 
 from __future__ import annotations
 
@@ -13,7 +8,7 @@ from enum import Enum
 from typing import Protocol
 from uuid import uuid4
 
-from .licensing import License
+from .licensing import License, LicenseRepository
 
 
 class PaymentStatus(str, Enum):
@@ -112,16 +107,17 @@ class SandboxPixGateway:
 
 
 class PaymentService:
-    """Create charges from server-owned license pricing.
+    """Create and settle license payments using server-owned state."""
 
-    The browser never supplies the amount. ``License.price_cents`` is read by
-    the backend and copied into the payment record, making the charge amount a
-    historical snapshot even if the license price is changed later.
-    """
-
-    def __init__(self, repository: PaymentRepository, gateway: PixGateway) -> None:
+    def __init__(
+        self,
+        repository: PaymentRepository,
+        gateway: PixGateway,
+        license_repository: LicenseRepository | None = None,
+    ) -> None:
         self.repository = repository
         self.gateway = gateway
+        self.license_repository = license_repository
 
     def create_license_charge(
         self,
@@ -136,3 +132,53 @@ class PaymentService:
             license_record.price_cents,
             expires_in,
         )
+
+    def confirm_and_activate(
+        self,
+        payment_id: str,
+        now: datetime | None = None,
+    ) -> License:
+        """Confirm a trusted payment and extend its bound license exactly once.
+
+        Repeated confirmations are idempotent because only a pending payment
+        can transition to confirmed and activate the license. Production
+        persistence should perform the payment-status transition and license
+        update in one database transaction.
+        """
+        if self.license_repository is None:
+            raise RuntimeError("license_repository is required for activation")
+        charge = self.repository.get(payment_id)
+        if charge is None:
+            raise KeyError(payment_id)
+        current = _utc(now)
+
+        license_record = self.license_repository.get_by_id(charge.license_id)
+        if license_record is None or license_record.account_id != charge.account_id:
+            raise ValueError("payment is not bound to a valid account license")
+
+        if charge.status == PaymentStatus.PENDING:
+            charge = self.gateway.confirm_sandbox_charge(payment_id)
+        if charge.status != PaymentStatus.CONFIRMED:
+            raise ValueError(f"payment is not confirmed: {charge.status.value}")
+
+        if license_record.revoked_at is not None:
+            raise ValueError("cannot activate a revoked license")
+
+        duration = license_record.expires_at - license_record.starts_at
+        if duration <= timedelta(0):
+            raise ValueError("license duration must be positive")
+        start = max(license_record.expires_at, current)
+        activated = replace(
+            license_record,
+            starts_at=license_record.starts_at if license_record.starts_at <= start else start,
+            expires_at=start + duration,
+        )
+        self.license_repository.save(activated)
+        return activated
+
+
+def _utc(value: datetime | None) -> datetime:
+    current = value or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        return current.replace(tzinfo=timezone.utc)
+    return current.astimezone(timezone.utc)
