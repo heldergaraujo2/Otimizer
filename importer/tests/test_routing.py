@@ -90,7 +90,7 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
 
     monkeypatch.setattr(routing, "urlopen", fake_urlopen)
     matrix = routing.fetch_osrm_table(locations, max_locations=3)
-    assert len(requests) == 25
+    assert len(requests) == 11
     assert all(len(request[2]) <= 3 for request in requests)
     assert len(matrix) == 5
     assert all(len(row) == 5 for row in matrix)
@@ -104,13 +104,15 @@ def test_fetch_osrm_table_reports_failed_tile_coordinates(monkeypatch):
     locations = [stop(index, -16.0 - index, -49.0 - index) for index in range(5)]
 
     def fail_first_tile(tile_locations, **kwargs):
-        if len(tile_locations) == 1 and tile_locations[0].id == "stop-1":
+        if len(tile_locations) == 2 and tile_locations[1].id == "stop-1":
             raise RoutingError("Routing provider returned NoRoute")
-        size = len(tile_locations)
-        return tuple(tuple(TravelMetric(0.0, 0.0) for _ in range(size)) for _ in range(size))
+        if kwargs.get("sources") is None and kwargs.get("destinations") is None:
+            size = len(tile_locations)
+            return tuple(tuple(TravelMetric(0.0, 0.0) for _ in range(size)) for _ in range(size))
+        return tuple(tuple(TravelMetric(0.0, 0.0) for _ in kwargs["destinations"]) for _ in kwargs["sources"])
 
     monkeypatch.setattr(routing, "_fetch_osrm_request", fail_first_tile)
-    with pytest.raises(RoutingError, match=r"OSRM tile failed .*sources 1:2.*destinations 1:2"):
+    with pytest.raises(RoutingError, match=r"OSRM tile failed .*sources 0:2.*destinations 0:2"):
         routing.fetch_osrm_table(locations, max_locations=3, max_concurrent_requests=1)
 
 
