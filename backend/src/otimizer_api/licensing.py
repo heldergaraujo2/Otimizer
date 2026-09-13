@@ -7,7 +7,7 @@ keeps route authorization independent from the future persistence layer.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
 from typing import Protocol
 
@@ -40,6 +40,17 @@ class License:
     def __post_init__(self) -> None:
         if self.price_cents < 0:
             raise ValueError("price_cents must be non-negative")
+
+    def change_price(self, price_cents: int) -> "License":
+        """Return this license with a new configured price.
+
+        The operation is immutable: the caller must persist the returned
+        license. Payment records keep their own amount, so changing this value
+        cannot retroactively change an already-created Pix charge.
+        """
+        if price_cents < 0:
+            raise ValueError("price_cents must be non-negative")
+        return replace(self, price_cents=price_cents)
 
     def is_active(self, now: datetime | None = None) -> bool:
         current = _utc(now)
