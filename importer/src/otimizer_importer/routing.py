@@ -69,37 +69,20 @@ def _configured_osrm_max_locations() -> int:
 class OSRMRoutingProvider:
     """Routing provider backed by the OSRM Table API."""
 
-    def __init__(
-        self,
-        *,
-        timeout_seconds: float | None = None,
-        base_url: str | None = None,
-        max_locations: int | None = None,
-    ) -> None:
+    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None, max_locations: int | None = None):
         self.timeout_seconds = _configured_osrm_timeout() if timeout_seconds is None else timeout_seconds
         self.base_url = _configured_osrm_base_url() if base_url is None else base_url
         self.max_locations = _configured_osrm_max_locations() if max_locations is None else max(2, max_locations)
 
     def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
-        return fetch_osrm_table(
-            list(locations),
-            timeout_seconds=self.timeout_seconds,
-            base_url=self.base_url,
-            max_locations=self.max_locations,
-        )
+        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url, max_locations=self.max_locations)
 
 
 def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
     return ";".join(f"{location.longitude},{location.latitude}" for location in locations)
 
 
-def build_osrm_table_url(
-    locations: list[PhysicalStop | RouteEndpoint],
-    base_url: str = DEFAULT_OSRM_BASE_URL,
-    *,
-    sources: Sequence[int] | None = None,
-    destinations: Sequence[int] | None = None,
-) -> str:
+def build_osrm_table_url(locations: list[PhysicalStop | RouteEndpoint], base_url: str = DEFAULT_OSRM_BASE_URL, *, sources: Sequence[int] | None = None, destinations: Sequence[int] | None = None) -> str:
     """Build an OSRM Table request, optionally selecting source/destination rows."""
     if not locations:
         raise ValueError("At least one location is required")
@@ -112,11 +95,7 @@ def build_osrm_table_url(
     return f"{base_url.rstrip('/')}/table/v1/driving/{coordinates}?{'&'.join(query)}"
 
 
-def parse_osrm_table(
-    payload: str | bytes,
-    expected_size: int,
-    expected_columns: int | None = None,
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
+def parse_osrm_table(payload: str | bytes, expected_size: int, expected_columns: int | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Parse an OSRM Table response into a road-network matrix."""
     columns = expected_size if expected_columns is None else expected_columns
     try:
@@ -152,20 +131,8 @@ def parse_osrm_table(
     return tuple(matrix)
 
 
-def _fetch_osrm_request(
-    locations: list[PhysicalStop | RouteEndpoint],
-    *,
-    timeout_seconds: float,
-    base_url: str,
-    sources: Sequence[int] | None = None,
-    destinations: Sequence[int] | None = None,
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    url = build_osrm_table_url(
-        locations,
-        base_url=base_url,
-        sources=sources,
-        destinations=destinations,
-    )
+def _fetch_osrm_request(locations: list[PhysicalStop | RouteEndpoint], *, timeout_seconds: float, base_url: str, sources: Sequence[int] | None = None, destinations: Sequence[int] | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
+    url = build_osrm_table_url(locations, base_url=base_url, sources=sources, destinations=destinations)
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "Otimizer/0.1"})
     try:
         with urlopen(request, timeout=timeout_seconds) as response:
@@ -181,84 +148,45 @@ def _chunks(size: int, chunk_size: int) -> list[range]:
     return [range(start, min(start + chunk_size, size)) for start in range(0, size, chunk_size)]
 
 
-def _fetch_osrm_tiled_table(
-    locations: list[PhysicalStop | RouteEndpoint],
-    *,
-    timeout_seconds: float,
-    base_url: str,
-    max_locations: int,
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
+def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, timeout_seconds: float, base_url: str, max_locations: int) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Fill a full matrix using bounded OSRM source/destination tiles."""
     size = len(locations)
     matrix: list[list[TravelMetric | None]] = [[None] * size for _ in range(size)]
     chunk_size = max(1, max_locations // 2)
     chunks = _chunks(size, chunk_size)
-
     for source_chunk in chunks:
         source_indices = list(source_chunk)
         for destination_chunk in chunks:
             destination_indices = list(destination_chunk)
             if source_chunk == destination_chunk:
                 tile_locations = [locations[index] for index in source_indices]
-                tile = _fetch_osrm_request(
-                    tile_locations,
-                    timeout_seconds=timeout_seconds,
-                    base_url=base_url,
-                )
+                tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url)
             else:
-                tile_locations = [locations[index] for index in source_indices] + [
-                    locations[index] for index in destination_indices
-                ]
+                tile_locations = [locations[index] for index in source_indices] + [locations[index] for index in destination_indices]
                 source_local = list(range(len(source_indices)))
                 destination_local = list(range(len(source_indices), len(tile_locations)))
-                tile = _fetch_osrm_request(
-                    tile_locations,
-                    timeout_seconds=timeout_seconds,
-                    base_url=base_url,
-                    sources=source_local,
-                    destinations=destination_local,
-                )
-
+                tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url, sources=source_local, destinations=destination_local)
             for row_offset, source_index in enumerate(source_indices):
                 for column_offset, destination_index in enumerate(destination_indices):
                     matrix[source_index][destination_index] = tile[row_offset][column_offset]
-
     return tuple(tuple(row) for row in matrix)
 
 
-def fetch_osrm_table(
-    locations: list[PhysicalStop | RouteEndpoint],
-    timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS,
-    base_url: str = DEFAULT_OSRM_BASE_URL,
-    max_locations: int = DEFAULT_OSRM_MAX_LOCATIONS,
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
+def fetch_osrm_table(locations: list[PhysicalStop | RouteEndpoint], timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS, base_url: str = DEFAULT_OSRM_BASE_URL, max_locations: int = DEFAULT_OSRM_MAX_LOCATIONS) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Fetch a complete road-network matrix, batching requests when necessary."""
     if not locations:
         raise ValueError("At least one location is required")
     max_locations = max(2, max_locations)
     if len(locations) <= max_locations:
-        return _fetch_osrm_request(
-            locations,
-            timeout_seconds=timeout_seconds,
-            base_url=base_url,
-        )
-    return _fetch_osrm_tiled_table(
-        locations,
-        timeout_seconds=timeout_seconds,
-        base_url=base_url,
-        max_locations=max_locations,
-    )
+        return _fetch_osrm_request(locations, timeout_seconds=timeout_seconds, base_url=base_url)
+    return _fetch_osrm_tiled_table(locations, timeout_seconds=timeout_seconds, base_url=base_url, max_locations=max_locations)
 
 
 def _location_key(location: PhysicalStop | RouteEndpoint) -> tuple[float, float]:
-    """Return the exact routing coordinate identity for safe matrix deduplication."""
     return (float(location.latitude), float(location.longitude))
 
 
-def _deduplicate_locations(
-    locations: Sequence[PhysicalStop | RouteEndpoint],
-) -> tuple[list[PhysicalStop | RouteEndpoint], list[int]]:
-    """Collapse identical coordinates while retaining an index for each input."""
+def _deduplicate_locations(locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[list[PhysicalStop | RouteEndpoint], list[int]]:
     unique: list[PhysicalStop | RouteEndpoint] = []
     index_by_key: dict[tuple[float, float], int] = {}
     expanded: list[int] = []
@@ -273,30 +201,14 @@ def _deduplicate_locations(
     return unique, expanded
 
 
-def _expand_matrix(
-    matrix: tuple[tuple[TravelMetric | None, ...], ...],
-    expanded_indices: Sequence[int],
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
-    """Expand a deduplicated matrix back to the caller's original location order."""
-    return tuple(
-        tuple(matrix[source_index][destination_index] for destination_index in expanded_indices)
-        for source_index in expanded_indices
-    )
+def _expand_matrix(matrix: tuple[tuple[TravelMetric | None, ...], ...], expanded_indices: Sequence[int]) -> tuple[tuple[TravelMetric | None, ...], ...]:
+    return tuple(tuple(matrix[source_index][destination_index] for destination_index in expanded_indices) for source_index in expanded_indices)
 
 
-def build_route_matrix(
-    stops: list[PhysicalStop],
-    origin: RouteEndpoint | None = None,
-    destination: RouteEndpoint | None = None,
-    *,
-    provider: RoutingProvider | None = None,
-) -> tuple[tuple[TravelMetric | None, ...], ...]:
+def build_route_matrix(stops: list[PhysicalStop], origin: RouteEndpoint | None = None, destination: RouteEndpoint | None = None, *, provider: RoutingProvider | None = None) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Build one matrix ordered as optional origin, stops, optional destination.
 
-    Identical coordinates are queried only once and then expanded back to the
-    original order. This is safe because road-network cost depends on the
-    routing coordinates, not on the delivery/property metadata attached to a
-    location.
+    Identical coordinates are queried only once and then expanded back to the original order.
     """
     locations: list[PhysicalStop | RouteEndpoint] = []
     if origin is not None:
@@ -308,7 +220,6 @@ def build_route_matrix(
         raise ValueError("At least one route location is required")
     if provider is None:
         provider = OSRMRoutingProvider()
-
     unique_locations, expanded_indices = _deduplicate_locations(locations)
     unique_matrix = provider.table(unique_locations)
     expected_size = len(unique_locations)
