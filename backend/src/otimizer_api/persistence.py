@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime, timezone
+from dataclasses import replace
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from .accounts import Account, AccountRepository, Session, SessionRepository
@@ -180,6 +181,18 @@ class SQLiteLicenseRepository(LicenseRepository):
                 ),
             )
 
+    def get_by_id(self, license_id: str) -> License | None:
+        with self.database.connect() as connection:
+            row = connection.execute(
+                """
+                SELECT license_id, account_id, starts_at, expires_at,
+                       route_optimization, max_devices, max_routes_per_day, price_cents, revoked_at
+                FROM licenses WHERE license_id = ?
+                """,
+                (license_id,),
+            ).fetchone()
+        return _license_from_row(row)
+
     def get_active_license(self, account_id: str, now: datetime) -> License | None:
         current = _iso(_utc(now))
         with self.database.connect() as connection:
@@ -197,7 +210,7 @@ class SQLiteLicenseRepository(LicenseRepository):
 
 
 class SQLitePaymentRepository(PaymentRepository):
-    """Durable payment store; amount and status are persisted independently."""
+    """Durable payment store with atomic payment/license settlement."""
 
     def __init__(self, database: SQLiteDatabase) -> None:
         self.database = database
@@ -241,6 +254,60 @@ class SQLitePaymentRepository(PaymentRepository):
                 (payment_id,),
             ).fetchone()
         return _payment_from_row(row)
+
+    def settle_confirmed_payment(self, payment_id: str, now: datetime) -> License:
+        """Settle a confirmed payment and extend its license in one transaction."""
+        current = _utc(now)
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            payment_row = connection.execute(
+                """
+                SELECT payment_id, account_id, license_id, amount_cents,
+                       expires_at, pix_copy_paste, status
+                FROM payments WHERE payment_id = ?
+                """,
+                (payment_id,),
+            ).fetchone()
+            if payment_row is None:
+                raise KeyError(payment_id)
+
+            charge = _payment_from_row(payment_row)
+            assert charge is not None
+            license_row = connection.execute(
+                """
+                SELECT license_id, account_id, starts_at, expires_at,
+                       route_optimization, max_devices, max_routes_per_day, price_cents, revoked_at
+                FROM licenses WHERE license_id = ?
+                """,
+                (charge.license_id,),
+            ).fetchone()
+            license_record = _license_from_row(license_row)
+            if license_record is None or license_record.account_id != charge.account_id:
+                raise ValueError("payment is not bound to a valid account license")
+            if charge.status == PaymentStatus.SETTLED:
+                return license_record
+            if charge.status != PaymentStatus.CONFIRMED:
+                raise ValueError(f"payment is not confirmed: {charge.status.value}")
+            if license_record.revoked_at is not None:
+                raise ValueError("cannot activate a revoked license")
+
+            duration = license_record.expires_at - license_record.starts_at
+            if duration <= timedelta(0):
+                raise ValueError("license duration must be positive")
+            start = max(license_record.expires_at, current)
+            activated = replace(license_record, expires_at=start + duration)
+
+            connection.execute(
+                "UPDATE licenses SET expires_at = ? WHERE license_id = ?",
+                (_iso(activated.expires_at), activated.license_id),
+            )
+            updated = connection.execute(
+                "UPDATE payments SET status = ? WHERE payment_id = ? AND status = ?",
+                (PaymentStatus.SETTLED.value, payment_id, PaymentStatus.CONFIRMED.value),
+            )
+            if updated.rowcount != 1:
+                raise RuntimeError("payment settlement lost its confirmation state")
+            return activated
 
 
 def build_sqlite_services(path: str | Path) -> tuple[SQLiteDatabase, AuthenticationService, LicenseAuthorizer]:
