@@ -1,5 +1,6 @@
 from openpyxl import Workbook
 
+from otimizer_importer.location import LocationDataProvider, LocationEvidence, ResolvedLocation
 from otimizer_importer.routing import TravelMetric
 from otimizer_importer.service import optimize_deliveries_file
 
@@ -14,6 +15,20 @@ class FakeRoutingProvider:
         return tuple(
             tuple(TravelMetric(100.0 * abs(row - col), 10.0 * abs(row - col)) for col in range(size))
             for row in range(size)
+        )
+
+
+class FakeLocationProvider(LocationDataProvider):
+    def __init__(self):
+        self.calls = []
+
+    def resolve(self, evidence: LocationEvidence):
+        self.calls.append(evidence)
+        return ResolvedLocation(
+            latitude=evidence.latitude + 0.001,
+            longitude=evidence.longitude + 0.001,
+            confidence=0.9,
+            source="fake",
         )
 
 
@@ -111,3 +126,23 @@ def test_service_ignores_sequence_and_stop_for_delivery_coverage(tmp_path):
     assert result.route.delivery_count == 3
     assert result.route.physical_stop_count == 3
     assert [stop.sequence for stop in result.route.stops] == [1, 2, 3]
+
+
+def test_service_resolves_each_unique_location_evidence_only_once(tmp_path):
+    path = tmp_path / "deliveries.xlsx"
+    write_xlsx(path)
+    location_provider = FakeLocationProvider()
+
+    result = optimize_deliveries_file(
+        str(path),
+        routing_provider=FakeRoutingProvider(),
+        location_provider=location_provider,
+    )
+
+    assert result.route.delivery_count == 3
+    assert len(location_provider.calls) == 2
+    assert len({
+        (e.latitude, e.longitude, e.normalized_address, e.number, e.quadra, e.lote, e.zipcode, e.neighborhood, e.city)
+        for e in location_provider.calls
+    }) == 2
+    assert all(stop.location_source == "fake" for stop in result.physical_stops)
