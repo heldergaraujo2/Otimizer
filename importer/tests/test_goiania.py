@@ -1,14 +1,14 @@
-from otimizer_importer.goiania import GoianiaLocationProvider, _representative_point
+from otimizer_importer.goiania import GoianiaLocationProvider, _point_from_geometry, _representative_point
 from otimizer_importer.location import LocationEvidence
 
 
-def evidence(city="Goiânia"):
+def evidence(city="Goiânia", number="123"):
     return LocationEvidence(
         latitude=-16.6800,
         longitude=-49.2500,
         address="Rua Exemplo, 123, Qd 10 Lt 5",
         normalized_address="rua exemplo 123 qd 10 lt 5",
-        number="123",
+        number=number,
         quadra="10",
         lote="5",
         zipcode="74000-000",
@@ -31,8 +31,41 @@ def test_representative_point_handles_missing_geometry():
     assert _representative_point({}) is None
 
 
-def test_provider_maps_nearest_cadastral_feature(monkeypatch):
+def test_point_from_arcgis_point_geometry():
+    assert _point_from_geometry({"x": -49.25, "y": -16.68}) == (-49.25, -16.68)
+    assert _point_from_geometry({}) is None
+
+
+def test_provider_prefers_exact_official_property_number(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
+    monkeypatch.setattr(
+        provider,
+        "_query_official_numbers",
+        lambda evidence: [
+            {
+                "attributes": {"id": "NPO-123", "nm_npo": "123"},
+                "geometry": {"x": -49.251, "y": -16.681},
+            },
+            {
+                "attributes": {"id": "NPO-999", "nm_npo": "999"},
+                "geometry": {"x": -49.2501, "y": -16.6801},
+            },
+        ],
+    )
+    monkeypatch.setattr(provider, "_query_lots", lambda evidence: [])
+
+    resolved = provider.resolve(evidence())
+    assert resolved is not None
+    assert resolved.source == "goiania-official-property-number"
+    assert resolved.cadastral_id == "NPO-123"
+    assert resolved.confidence == 0.92
+    assert resolved.latitude == -16.681
+    assert resolved.longitude == -49.251
+
+
+def test_provider_falls_back_to_cadastral_lot_without_number_match(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    monkeypatch.setattr(provider, "_query_official_numbers", lambda evidence: [])
     monkeypatch.setattr(
         provider,
         "_query_lots",
