@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Otimizer — Rota de entregas</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <main class="app-shell">
+    <header class="topbar">
+      <div>
+        <span class="eyebrow">OTIMIZER</span>
+        <h1>Otimize sua rota</h1>
+      </div>
+      <span id="status" class="status">Pronto</span>
+    </header>
+
+    <section class="panel setup-panel">
+      <h2>1. Arquivo de entregas</h2>
+      <label class="file-drop" for="file-input">
+        <strong id="file-name">Selecione um arquivo .xlsx</strong>
+        <span>Os dados são enviados somente quando você iniciar a otimização.</span>
+        <input id="file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
+      </label>
+
+      <div class="controls">
+        <label>Objetivo
+          <select id="objective">
+            <option value="time">Menor tempo</option>
+            <option value="distance">Menor distância</option>
+          </select>
+        </label>
+        <label>Retornar ao início
+          <select id="return-to-start">
+            <option value="false">Não</option>
+            <option value="true">Sim</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="controls endpoints">
+        <label>Origem — latitude
+          <input id="origin-lat" inputmode="decimal" placeholder="Opcional">
+        </label>
+        <label>Origem — longitude
+          <input id="origin-lon" inputmode="decimal" placeholder="Opcional">
+        </label>
+        <label>Destino — latitude
+          <input id="destination-lat" inputmode="decimal" placeholder="Opcional">
+        </label>
+        <label>Destino — longitude
+          <input id="destination-lon" inputmode="decimal" placeholder="Opcional">
+        </label>
+      </div>
+
+      <button id="optimize" class="primary" disabled>Otimizar rota</button>
+      <p id="error" class="error" role="alert" hidden></p>
+    </section>
+
+    <section id="result" hidden>
+      <div class="summary-grid">
+        <article><span>Entregas</span><strong id="delivery-count">—</strong></article>
+        <article><span>Paradas</span><strong id="stop-count">—</strong></article>
+        <article><span>Distância</span><strong id="distance">—</strong></article>
+        <article><span>Tempo</span><strong id="duration">—</strong></article>
+      </div>
+
+      <div class="coverage" id="coverage"></div>
+      <div id="map" class="map"></div>
+      <section class="panel stops-panel">
+        <div class="section-heading"><h2>Sequência de entregas</h2><span id="pending"></span></div>
+        <div id="stops" class="stops"></div>
+      </section>
+    </section>
+  </main>
+
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
