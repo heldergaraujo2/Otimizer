@@ -104,7 +104,7 @@ def test_fetch_osrm_table_reports_failed_tile_coordinates(monkeypatch):
     locations = [stop(index, -16.0 - index, -49.0 - index) for index in range(5)]
 
     def fail_first_tile(tile_locations, **kwargs):
-        if len(tile_locations) == 2 and tile_locations[1].id == "stop-1":
+        if kwargs.get("sources") is None and kwargs.get("destinations") is None and len(tile_locations) == 2 and tile_locations[0].id == "stop-0":
             raise RoutingError("Routing provider returned NoRoute")
         if kwargs.get("sources") is None and kwargs.get("destinations") is None:
             size = len(tile_locations)
