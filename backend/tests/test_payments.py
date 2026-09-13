@@ -2,7 +2,7 @@ from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from otimizer_api.licensing import Entitlements, License
+from otimizer_api.licensing import Entitlements, InMemoryLicenseRepository, License
 from otimizer_api.payments import InMemoryPaymentRepository, PaymentService, PaymentStatus, SandboxPixGateway
 
 
@@ -47,6 +47,32 @@ def test_payment_service_uses_server_license_price_and_snapshots_amount() -> Non
     assert charge.amount_cents == 2990
     assert changed_license.price_cents == 4990
     assert repository.get(charge.payment_id) == charge
+
+
+def test_payment_service_confirms_and_extends_license_once() -> None:
+    payments = InMemoryPaymentRepository()
+    licenses = InMemoryLicenseRepository([make_license()])
+    service = PaymentService(payments, SandboxPixGateway(payments), licenses)
+    now = datetime.now(timezone.utc)
+    charge = service.create_license_charge(licenses.get_by_id("lic-1"))
+
+    activated = service.confirm_and_activate(charge.payment_id, now=now)
+    again = service.confirm_and_activate(charge.payment_id, now=now + timedelta(hours=1))
+
+    assert activated.expires_at > now + timedelta(days=29)
+    assert again == activated
+    assert payments.get(charge.payment_id).status is PaymentStatus.SETTLED
+
+
+def test_payment_service_rejects_unconfirmed_payment() -> None:
+    payments = InMemoryPaymentRepository()
+    licenses = InMemoryLicenseRepository([make_license()])
+    service = PaymentService(payments, SandboxPixGateway(payments), licenses)
+    charge = service.create_license_charge(licenses.get_by_id("lic-1"))
+    payments.save(charge.__class__(**{**charge.__dict__, "status": PaymentStatus.FAILED}))
+
+    with pytest.raises(ValueError, match="not confirmed"):
+        service.confirm_and_activate(charge.payment_id)
 
 
 def test_payment_service_rejects_free_license() -> None:
