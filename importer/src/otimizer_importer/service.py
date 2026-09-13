@@ -1,5 +1,6 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
+from .location import LocationDataProvider, LocationEvidence
 from .metrics import RouteMetrics, calculate_route_metrics
 from .models import Delivery, PhysicalStop, Route
 from .optimization import OptimizationObjective, OptimizationResult, RouteEndpoint, OptimizationProblem, optimize
@@ -81,10 +82,34 @@ def _validate_route_coverage(
         raise ValueError("Optimized route sequence numbers are not contiguous")
 
 
+def _resolve_physical_stops(
+    physical_stops: list[PhysicalStop],
+    provider: LocationDataProvider | None,
+) -> list[PhysicalStop]:
+    """Apply the strongest available property location without losing XLSX GPS."""
+    if provider is None:
+        return physical_stops
+
+    resolved: list[PhysicalStop] = []
+    for stop in physical_stops:
+        candidates = []
+        for delivery in stop.deliveries:
+            location = provider.resolve(LocationEvidence.from_delivery(delivery))
+            if location is not None:
+                candidates.append(location)
+        if not candidates:
+            resolved.append(stop)
+            continue
+        best = max(candidates, key=lambda location: location.confidence)
+        resolved.append(replace(stop, latitude=best.latitude, longitude=best.longitude))
+    return resolved
+
+
 def optimize_deliveries_file(
     path: str,
     *,
     routing_provider: RoutingProvider | None = None,
+    location_provider: LocationDataProvider | None = None,
     origin: RouteEndpoint | None = None,
     destination: RouteEndpoint | None = None,
     start_index: int = 0,
@@ -96,9 +121,11 @@ def optimize_deliveries_file(
     if imported.eligible_delivery_count == 0:
         raise ValueError("Workbook contains no deliveries with valid latitude and longitude")
 
-    physical_stops = tuple(group_physical_stops(list(imported.deliveries)))
+    physical_stops = group_physical_stops(list(imported.deliveries))
+    physical_stops = _resolve_physical_stops(physical_stops, location_provider)
+    physical_stops_tuple = tuple(physical_stops)
     full_matrix = build_route_matrix(
-        list(physical_stops),
+        physical_stops,
         origin=origin,
         destination=destination,
         provider=routing_provider,
@@ -113,10 +140,10 @@ def optimize_deliveries_file(
         objective=objective,
     )
     result = optimize(problem)
-    _validate_route_coverage(imported.deliveries, physical_stops, result.route)
+    _validate_route_coverage(imported.deliveries, physical_stops_tuple, result.route)
     route_metrics = calculate_route_metrics(
         result.route,
-        list(physical_stops),
+        physical_stops,
         problem.matrix,
         return_to_start=result.return_to_start,
         origin_id=result.origin.id if result.origin is not None else None,
@@ -127,7 +154,7 @@ def optimize_deliveries_file(
     service_result = OptimizationServiceResult(
         eligible_delivery_count=imported.eligible_delivery_count,
         unresolved_rows=imported.unresolved_rows,
-        physical_stops=physical_stops,
+        physical_stops=physical_stops_tuple,
         optimization=result,
         route_metrics=route_metrics,
     )
