@@ -12,6 +12,12 @@ from hashlib import sha256
 from secrets import token_urlsafe
 from typing import Protocol
 
+from argon2 import PasswordHasher
+from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+
+
+_PASSWORD_HASHER = PasswordHasher()
+
 
 @dataclass(frozen=True)
 class Account:
@@ -85,11 +91,14 @@ class InMemorySessionRepository:
 def hash_password(password: str) -> str:
     if len(password) < 12:
         raise ValueError("Password must contain at least 12 characters")
-    return sha256(password.encode("utf-8")).hexdigest()
+    return _PASSWORD_HASHER.hash(password)
 
 
 def verify_password(password: str, password_hash: str) -> bool:
-    return sha256(password.encode("utf-8")).hexdigest() == password_hash
+    try:
+        return _PASSWORD_HASHER.verify(password_hash, password)
+    except (InvalidHashError, VerificationError, VerifyMismatchError):
+        return False
 
 
 def create_session(account_id: str, repository: SessionRepository, lifetime: timedelta = timedelta(hours=12)) -> str:
