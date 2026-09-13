@@ -18,6 +18,8 @@ class Delivery:
     longitude: float
     quadra: str | None = None
     lote: str | None = None
+    number: str | None = None
+    normalized_address: str | None = None
 
 
 @dataclass
