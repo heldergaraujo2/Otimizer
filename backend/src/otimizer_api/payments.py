@@ -138,6 +138,37 @@ class PaymentService:
             expires_in,
         )
 
+    def confirm_provider_payment(self, payment_id: str, amount_cents: int) -> PixCharge:
+        """Record a provider-confirmed payment after adapter-level verification.
+
+        The caller is responsible for authenticating the provider webhook or
+        server-to-server response before calling this method. The amount is
+        compared with the immutable charge snapshot, so changing a license's
+        configured price cannot alter an already-issued Pix charge.
+        """
+        charge = self.repository.get(payment_id)
+        if charge is None:
+            raise KeyError(payment_id)
+        if amount_cents <= 0:
+            raise ValueError("provider amount must be positive")
+        if charge.status == PaymentStatus.CONFIRMED:
+            if amount_cents != charge.amount_cents:
+                raise ValueError("provider amount does not match the payment")
+            return charge
+        if charge.status == PaymentStatus.SETTLED:
+            return charge
+        if charge.status != PaymentStatus.PENDING:
+            raise ValueError(f"payment cannot be confirmed: {charge.status.value}")
+        if datetime.now(timezone.utc) >= charge.expires_at:
+            expired = replace(charge, status=PaymentStatus.EXPIRED)
+            self.repository.save(expired)
+            raise ValueError("payment has expired")
+        if amount_cents != charge.amount_cents:
+            raise ValueError("provider amount does not match the payment")
+        confirmed = replace(charge, status=PaymentStatus.CONFIRMED)
+        self.repository.save(confirmed)
+        return confirmed
+
     def settle_confirmed_payment(
         self,
         payment_id: str,
