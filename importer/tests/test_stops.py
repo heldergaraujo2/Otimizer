@@ -17,7 +17,7 @@ def delivery(
         source_sequence=None,
         source_stop=source_stop,
         tracking_number=f"TN-{row}",
-        address=address if address is not None else f"Rua {row}",
+        address=address,
         neighborhood=None,
         city="Cidade",
         zipcode=None,
@@ -30,8 +30,8 @@ def delivery(
 
 def test_same_location_groups_deliveries_and_preserves_records():
     deliveries = [
-        delivery(2, -16.6869, -49.2648, "1"),
-        delivery(3, -16.6869, -49.2648, "1"),
+        delivery(2, -16.6869, -49.2648, "1", "Rua das Flores, 100"),
+        delivery(3, -16.6869, -49.2648, "1", "Rua das Flores, 100"),
     ]
 
     stops = group_physical_stops(deliveries)
@@ -54,8 +54,8 @@ def test_source_stop_does_not_merge_distinct_coordinates():
 
 
 def test_missing_source_sequence_is_not_relevant_to_grouping():
-    first = delivery(2, -16.6869, -49.2648, "-")
-    second = delivery(3, -16.6869, -49.2648, "-")
+    first = delivery(2, -16.6869, -49.2648, "-", "Rua das Flores, 100")
+    second = delivery(3, -16.6869, -49.2648, "-", "Rua das Flores, 100")
 
     stops = group_physical_stops([first, second])
 
