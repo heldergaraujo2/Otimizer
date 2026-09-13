@@ -1,4 +1,9 @@
-from otimizer_importer.goiania import GoianiaLocationProvider, _point_from_geometry, _representative_point
+from otimizer_importer.goiania import (
+    GoianiaLocationProvider,
+    _nearest_point_on_segment,
+    _point_from_geometry,
+    _representative_point,
+)
 from otimizer_importer.location import LocationEvidence
 
 
@@ -36,6 +41,11 @@ def test_point_from_arcgis_point_geometry():
     assert _point_from_geometry({}) is None
 
 
+def test_nearest_point_on_street_segment():
+    assert _nearest_point_on_segment((5.0, 2.0), [0.0, 0.0], [10.0, 0.0]) == (5.0, 0.0)
+    assert _nearest_point_on_segment((20.0, 2.0), [0.0, 0.0], [10.0, 0.0]) == (10.0, 0.0)
+
+
 def test_provider_prefers_exact_official_property_number(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     monkeypatch.setattr(
@@ -53,6 +63,7 @@ def test_provider_prefers_exact_official_property_number(monkeypatch):
         ],
     )
     monkeypatch.setattr(provider, "_query_lots", lambda evidence: [])
+    monkeypatch.setattr(provider, "_query_street_segments", lambda evidence: [])
 
     resolved = provider.resolve(evidence())
     assert resolved is not None
@@ -63,9 +74,39 @@ def test_provider_prefers_exact_official_property_number(monkeypatch):
     assert resolved.longitude == -49.251
 
 
+def test_provider_uses_street_segment_as_vehicle_access_candidate(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    monkeypatch.setattr(
+        provider,
+        "_query_official_numbers",
+        lambda evidence: [
+            {
+                "attributes": {"id": "NPO-123", "nm_npo": "123"},
+                "geometry": {"x": 5.0, "y": 2.0},
+            }
+        ],
+    )
+    monkeypatch.setattr(provider, "_query_street_segments", lambda evidence: [
+        {"geometry": {"paths": [[[0.0, 0.0], [10.0, 0.0]]]}}
+    ])
+    monkeypatch.setattr(provider, "_query_lots", lambda evidence: [])
+
+    resolved = provider.resolve(evidence())
+    assert resolved is not None
+    assert resolved.source == "goiania-official-property-number-road-access"
+    assert resolved.property_longitude == 5.0
+    assert resolved.property_latitude == 2.0
+    assert resolved.access_longitude == 5.0
+    assert resolved.access_latitude == 0.0
+    assert resolved.longitude == 5.0
+    assert resolved.latitude == 0.0
+    assert resolved.confidence == 0.96
+
+
 def test_provider_falls_back_to_cadastral_lot_without_number_match(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     monkeypatch.setattr(provider, "_query_official_numbers", lambda evidence: [])
+    monkeypatch.setattr(provider, "_query_street_segments", lambda evidence: [])
     monkeypatch.setattr(
         provider,
         "_query_lots",
