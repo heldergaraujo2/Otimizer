@@ -11,6 +11,11 @@ REQUIRED_COLUMNS = {
     "Longitude",
 }
 
+OPTIONAL_COLUMN_ALIASES = {
+    "quadra": ("Quadra", "QUADRA", "quadra"),
+    "lote": ("Lote", "LOTE", "lote"),
+}
+
 
 def _text(value: Any) -> str | None:
     if value is None:
@@ -43,6 +48,13 @@ def _longitude(value: Any) -> float | None:
     return number
 
 
+def _find_optional_column(columns: dict[str | None, int], aliases: tuple[str, ...]) -> str | None:
+    for alias in aliases:
+        if alias in columns:
+            return alias
+    return None
+
+
 def import_result(path: str | Path) -> ImportResult:
     """Import an XLSX and return an auditable accounting of every data row.
 
@@ -51,6 +63,11 @@ def import_result(path: str | Path) -> ImportResult:
     that reports only the first column). In that situation openpyxl's
     read-only iterator can hide valid cells such as Latitude and Longitude.
     The uploaded delivery exports demonstrated this exact failure mode.
+
+    Quadra and Lote are optional because not every delivery export contains
+    them. When present, they are preserved as location evidence for the
+    physical-stop reconciliation layer; they never replace latitude/longitude
+    or cause a delivery row to be discarded.
     """
     workbook = load_workbook(filename=path, read_only=False, data_only=True)
     try:
@@ -66,7 +83,12 @@ def import_result(path: str | Path) -> ImportResult:
         if missing:
             raise ValueError(f"Colunas obrigatórias ausentes: {sorted(missing)}")
 
-        def get(row: tuple[Any, ...], name: str) -> Any:
+        quadra_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["quadra"])
+        lote_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["lote"])
+
+        def get(row: tuple[Any, ...], name: str | None) -> Any:
+            if name is None:
+                return None
             index = columns.get(name)
             return row[index] if index is not None and index < len(row) else None
 
@@ -95,6 +117,8 @@ def import_result(path: str | Path) -> ImportResult:
                     zipcode=_text(get(row, "Zipcode/Postal code")),
                     latitude=latitude,
                     longitude=longitude,
+                    quadra=_text(get(row, quadra_column)),
+                    lote=_text(get(row, lote_column)),
                 )
             )
 
