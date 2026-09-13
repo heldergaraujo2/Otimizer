@@ -167,19 +167,30 @@ def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, ti
         if source_chunk == destination_chunk:
             tile_locations = [locations[index] for index in source_indices]
             tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url)
-        else:
-            tile_locations = [locations[index] for index in source_indices] + [locations[index] for index in destination_indices]
+            return source_indices, destination_indices, tile
+
+        remaining_destinations = destination_indices
+        while remaining_destinations:
+            capacity = max_locations - len(source_indices)
+            if capacity <= 0:
+                raise RoutingError("OSRM tile cannot fit source locations within provider limit")
+            destination_part = remaining_destinations[:capacity]
+            remaining_destinations = remaining_destinations[capacity:]
+            tile_locations = [locations[index] for index in source_indices] + [locations[index] for index in destination_part]
             source_local = list(range(len(source_indices)))
             destination_local = list(range(len(source_indices), len(tile_locations)))
             tile = _fetch_osrm_request(tile_locations, timeout_seconds=timeout_seconds, base_url=base_url, sources=source_local, destinations=destination_local)
-        return source_indices, destination_indices, tile
+            for row_offset, source_index in enumerate(source_indices):
+                for column_offset, destination_index in enumerate(destination_part):
+                    matrix[source_index][destination_index] = tile[row_offset][column_offset]
+        return source_indices, destination_indices, None
 
+    futures = {}
     with ThreadPoolExecutor(max_workers=max_concurrent_requests) as executor:
-        futures = {
-            executor.submit(fetch_tile, source_chunk, destination_chunk): (source_chunk, destination_chunk)
-            for source_chunk in chunks
-            for destination_chunk in chunks
-        }
+        for source_chunk in chunks:
+            for destination_chunk in chunks:
+                futures[executor.submit(fetch_tile, source_chunk, destination_chunk)] = (source_chunk, destination_chunk)
+
         for future in as_completed(futures):
             source_chunk, destination_chunk = futures[future]
             try:
@@ -190,9 +201,10 @@ def _fetch_osrm_tiled_table(locations: list[PhysicalStop | RouteEndpoint], *, ti
                 raise RoutingError(
                     f"OSRM tile failed (sources {source_label}, destinations {destination_label})"
                 ) from exc
-            for row_offset, source_index in enumerate(source_indices):
-                for column_offset, destination_index in enumerate(destination_indices):
-                    matrix[source_index][destination_index] = tile[row_offset][column_offset]
+            if tile is not None:
+                for row_offset, source_index in enumerate(source_indices):
+                    for column_offset, destination_index in enumerate(destination_indices):
+                        matrix[source_index][destination_index] = tile[row_offset][column_offset]
     return tuple(tuple(row) for row in matrix)
 
 
