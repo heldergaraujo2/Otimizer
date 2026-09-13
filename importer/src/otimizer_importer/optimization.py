@@ -142,13 +142,7 @@ def _order_cost(order, problem: OptimizationProblem):
 
 
 def _two_opt(order, problem: OptimizationProblem):
-    """Improve a complete route while preserving required endpoints.
-
-    Candidate scores are updated by delta instead of rescanning the complete
-    route. For directed road costs, reversing a segment also reverses every
-    internal arc, so the implementation uses prefix sums of both directions
-    and a prefix count of unreachable reverse arcs.
-    """
+    """Improve a complete route while preserving required endpoints."""
     current = tuple(order)
     current_cost = _order_cost(current, problem)
     if current_cost is None:
@@ -176,9 +170,6 @@ def _two_opt(order, problem: OptimizationProblem):
             )
             reverse_missing[index + 1] = reverse_missing[index] + (reverse is None)
 
-        # A destination endpoint is fixed, so the final stop cannot move. An
-        # open route may move its final stop, and a return-to-start route may
-        # also move it because the return arc is part of the candidate cost.
         final_end = size - 2 if problem.destination_metrics is not None else size - 1
         for start in range(1, max(1, final_end)):
             for end in range(start + 1, final_end + 1):
@@ -327,6 +318,33 @@ def _greedy_order(stops, matrix, starts, objective, origin_metrics, destination_
     return best[1]
 
 
+def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
+    """Choose bounded deterministic starts for large routes with a free origin."""
+    if problem.origin_metrics is None:
+        return (problem.start_index,)
+
+    reachable = [
+        index for index, metric in enumerate(problem.origin_metrics)
+        if metric is not None
+    ]
+    if not reachable:
+        return ()
+
+    # Trying every possible first stop makes a 100-stop route unnecessarily
+    # expensive. Keep the best origin candidates and a few evenly distributed
+    # alternatives, while remaining deterministic and bounded.
+    limit = min(12, len(reachable))
+    ranked = sorted(
+        reachable,
+        key=lambda index: (*_metric_cost(problem.origin_metrics[index], problem.objective), index),
+    )
+    selected = ranked[:limit]
+    if len(reachable) > limit:
+        step = max(1, len(ranked) // limit)
+        selected.extend(ranked[::step][:limit])
+    return tuple(dict.fromkeys(selected))
+
+
 def _optimize_order(problem, starts):
     if len(problem.stops) <= 12:
         return _exact_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
@@ -338,12 +356,9 @@ def optimize(problem: OptimizationProblem) -> OptimizationResult:
     """Optimize the complete road trip while preserving every physical stop."""
     if not problem.stops:
         return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False, problem.origin, problem.destination)
-    if problem.origin is None:
-        starts = (problem.start_index,)
-    else:
-        starts = tuple(index for index, metric in enumerate(problem.origin_metrics or ()) if metric is not None)
-        if not starts:
-            raise OptimizationError("No road-network path reaches a physical stop from the origin")
+    starts = _heuristic_starts(problem) if problem.origin is not None else (problem.start_index,)
+    if not starts:
+        raise OptimizationError("No road-network path reaches a physical stop from the origin")
     order = _optimize_order(problem, starts)
     route = Route.from_physical_stops([problem.stops[index] for index in order])
     origin_metric = problem.origin_metrics[order[0]] if problem.origin is not None else None
