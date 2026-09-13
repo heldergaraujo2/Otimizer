@@ -109,6 +109,67 @@ def _add_cost(left: tuple[float, float], right: tuple[float, float]) -> tuple[fl
     return left[0] + right[0], left[1] + right[1]
 
 
+def _order_cost(order, problem: OptimizationProblem):
+    """Return total lexicographic objective cost for a complete order."""
+    total = (0.0, 0.0)
+    if problem.origin_metrics is not None:
+        metric = problem.origin_metrics[order[0]]
+        if metric is None:
+            return None
+        total = _add_cost(total, _metric_cost(metric, problem.objective))
+
+    for current, next_index in zip(order, order[1:]):
+        metric = problem.matrix[current][next_index]
+        if metric is None:
+            return None
+        total = _add_cost(total, _metric_cost(metric, problem.objective))
+
+    if problem.destination_metrics is not None:
+        metric = problem.destination_metrics[order[-1]]
+        if metric is None:
+            return None
+        total = _add_cost(total, _metric_cost(metric, problem.objective))
+    elif problem.return_to_start:
+        metric = problem.matrix[order[-1]][order[0]]
+        if metric is None:
+            return None
+        total = _add_cost(total, _metric_cost(metric, problem.objective))
+    return total
+
+
+def _two_opt(order, problem: OptimizationProblem):
+    """Improve a complete route while preserving its first and last endpoints."""
+    current = tuple(order)
+    current_cost = _order_cost(current, problem)
+    if current_cost is None:
+        return current
+
+    improved = True
+    while improved:
+        improved = False
+        best_order = current
+        best_cost = current_cost
+        size = len(current)
+
+        # Reversing a segment is valid for directed road costs only when the
+        # resulting directed legs are present, so every candidate is scored
+        # against the actual routing matrix rather than using a symmetric delta.
+        for start in range(1, size - 1):
+            for end in range(start + 1, size):
+                candidate = current[:start] + current[start:end + 1][::-1] + current[end + 1:]
+                candidate_cost = _order_cost(candidate, problem)
+                if candidate_cost is not None and candidate_cost < best_cost:
+                    best_order = candidate
+                    best_cost = candidate_cost
+
+        if best_order != current:
+            current = best_order
+            current_cost = best_cost
+            improved = True
+
+    return current
+
+
 def _exact_order(stops, matrix, starts, objective, origin_metrics, destination_metrics, return_to_start):
     size = len(stops)
     best = None
@@ -167,7 +228,10 @@ def _greedy_order(stops, matrix, starts, objective, origin_metrics, destination_
         current = start
         total = (0.0, 0.0)
         if origin_metrics is not None:
-            total = _add_cost(total, _metric_cost(origin_metrics[start], objective))
+            metric = origin_metrics[start]
+            if metric is None:
+                continue
+            total = _add_cost(total, _metric_cost(metric, objective))
         while remaining:
             candidates = [i for i in remaining if matrix[current][i] is not None]
             if not candidates:
@@ -200,7 +264,8 @@ def _greedy_order(stops, matrix, starts, objective, origin_metrics, destination_
 def _optimize_order(problem, starts):
     if len(problem.stops) <= 12:
         return _exact_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
-    return _greedy_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
+    greedy = _greedy_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
+    return _two_opt(greedy, problem)
 
 
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
