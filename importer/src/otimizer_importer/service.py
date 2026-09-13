@@ -1,7 +1,7 @@
 from dataclasses import dataclass
 
 from .metrics import RouteMetrics, calculate_route_metrics
-from .models import PhysicalStop, Route
+from .models import Delivery, PhysicalStop, Route
 from .optimization import OptimizationObjective, OptimizationResult, RouteEndpoint, OptimizationProblem, optimize
 from .routing import RoutingProvider, build_route_matrix
 from .stops import group_physical_stops
@@ -52,6 +52,35 @@ class OptimizationServiceResult:
         return self.coverage_complete and self.pending_count == 0
 
 
+def _validate_route_coverage(
+    deliveries: tuple[Delivery, ...],
+    physical_stops: tuple[PhysicalStop, ...],
+    route: Route,
+) -> None:
+    """Enforce exact Delivery -> PhysicalStop -> Route coverage invariants."""
+    expected_rows = {delivery.row_number for delivery in deliveries}
+    routed_deliveries = [
+        delivery
+        for route_stop in route.stops
+        for delivery in route_stop.physical_stop.deliveries
+    ]
+    routed_rows = [delivery.row_number for delivery in routed_deliveries]
+
+    if len(routed_rows) != len(set(routed_rows)) or set(routed_rows) != expected_rows:
+        raise ValueError("Optimized route does not contain every eligible delivery exactly once")
+
+    expected_stop_ids = {stop.id for stop in physical_stops}
+    routed_stop_ids = [route_stop.physical_stop.id for route_stop in route.stops]
+    if len(routed_stop_ids) != len(set(routed_stop_ids)) or set(routed_stop_ids) != expected_stop_ids:
+        raise ValueError("Optimized route does not contain every physical stop exactly once")
+
+    if any(not route_stop.physical_stop.deliveries for route_stop in route.stops):
+        raise ValueError("Optimized route contains a physical stop without deliveries")
+
+    if tuple(stop.sequence for stop in route.stops) != tuple(range(1, len(route.stops) + 1)):
+        raise ValueError("Optimized route sequence numbers are not contiguous")
+
+
 def optimize_deliveries_file(
     path: str,
     *,
@@ -84,6 +113,7 @@ def optimize_deliveries_file(
         objective=objective,
     )
     result = optimize(problem)
+    _validate_route_coverage(imported.deliveries, physical_stops, result.route)
     route_metrics = calculate_route_metrics(
         result.route,
         list(physical_stops),
