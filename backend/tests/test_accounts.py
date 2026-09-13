@@ -13,12 +13,18 @@ from otimizer_api.accounts import (
 )
 
 
-def test_password_hash_is_not_plaintext_and_verifies():
+def test_password_hash_uses_argon2id_and_verifies():
     password = "a-strong-development-password"
     password_hash = hash_password(password)
     assert password_hash != password
+    assert password_hash.startswith("$argon2id$")
     assert verify_password(password, password_hash)
     assert not verify_password("wrong-password", password_hash)
+
+
+def test_password_hash_is_salted():
+    password = "a-strong-development-password"
+    assert hash_password(password) != hash_password(password)
 
 
 def test_short_password_is_rejected():
