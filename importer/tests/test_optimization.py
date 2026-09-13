@@ -46,7 +46,6 @@ def test_destination_changes_exact_route_selection():
     origin = RouteEndpoint(-16.69, -49.19, "depot")
     destination = RouteEndpoint(-16.75, -49.25, "final")
     matrix = (
-        # depot, stop0, stop1, stop2, final
         (TravelMetric(0, 0), TravelMetric(1, 1), TravelMetric(1, 1), TravelMetric(1, 1), TravelMetric(99, 99)),
         (TravelMetric(1, 1), TravelMetric(0, 0), TravelMetric(1, 1), TravelMetric(1, 1), TravelMetric(100, 100)),
         (TravelMetric(1, 1), TravelMetric(1, 1), TravelMetric(0, 0), TravelMetric(1, 1), TravelMetric(100, 100)),
@@ -70,10 +69,11 @@ def test_destination_changes_exact_route_selection():
     assert result.route.delivery_count == 3
 
 
-def test_full_matrix_rejects_wrong_size():
+def test_full_matrix_rejects_wrong_size_when_origin_is_declared():
     stops = (make_stop(0),)
+    origin = RouteEndpoint(-16.69, -49.19, "depot")
     with pytest.raises(ValueError, match="Full routing matrix size"):
-        OptimizationProblem.from_full_matrix(stops, ((TravelMetric(0, 0),),))
+        OptimizationProblem.from_full_matrix(stops, ((TravelMetric(0, 0),),), origin=origin)
 
 
 def test_endpoint_constraints_reject_incomplete_route():
