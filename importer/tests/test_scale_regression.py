@@ -35,9 +35,10 @@ def make_rows(count, *, same_location=False):
         longitude = -49.25 if same_location else -49.25 + (index % 10) * 0.001
         sequence = "-" if index % 11 == 0 else index + 1
         stop = "-" if index % 13 == 0 else (index // 2) + 1
+        address = "Rua Teste, 100" if same_location else f"Endereço anonimizado {index + 1}"
         rows.append([
             str(index + 1), sequence, stop, f"TN-{index + 1:03d}",
-            f"Endereço anonimizado {index + 1}", "Bairro teste", "Cidade teste",
+            address, "Bairro teste", "Cidade teste",
             "00000-000", latitude, longitude,
         ])
     return rows
