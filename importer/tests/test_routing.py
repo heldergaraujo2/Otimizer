@@ -94,6 +94,7 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
     assert all(len(request[2]) <= 3 for request in requests)
     assert len(matrix) == 5
     assert all(len(row) == 5 for row in matrix)
+    assert all(value is not None for row in matrix for value in row)
     assert matrix[0][4] == TravelMetric(4000.0, 40.0)
     assert matrix[4][0] == TravelMetric(4000.0, 40.0)
     assert matrix[2][2] == TravelMetric(0.0, 0.0)
