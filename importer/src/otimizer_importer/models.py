@@ -16,6 +16,8 @@ class Delivery:
     zipcode: str | None
     latitude: float
     longitude: float
+    quadra: str | None = None
+    lote: str | None = None
 
 
 @dataclass
