@@ -26,6 +26,7 @@ def authorizer_for(*, active=True):
         account_id="acct-1",
         starts_at=now - timedelta(days=1),
         expires_at=now + timedelta(days=1) if active else now - timedelta(seconds=1),
+        price_cents=2990,
     )
     return LicenseAuthorizer(InMemoryLicenseRepository([license_record]))
 
@@ -101,3 +102,27 @@ def test_active_license_allows_request_to_reach_file_validation():
     )
     assert response.status_code == 422
     assert response.json()["detail"] == "The uploaded file must be an .xlsx workbook"
+
+
+def test_authenticated_user_can_read_own_active_license():
+    authorizer = authorizer_for(active=True)
+    client = TestClient(create_app(auth_service=auth_service(), license_authorizer=authorizer))
+
+    response = client.get("/licenses/me", headers=bearer_headers(client))
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["active"] is True
+    assert payload["license"]["license_id"] == "lic-1"
+    assert payload["license"]["account_id"] == "acct-1"
+    assert payload["license"]["price_cents"] == 2990
+    assert payload["license"]["entitlements"]["route_optimization"] is True
+
+
+def test_license_status_requires_authentication():
+    client = TestClient(create_app(license_authorizer=authorizer_for()))
+
+    response = client.get("/licenses/me")
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Authentication is required"
