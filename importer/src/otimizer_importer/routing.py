@@ -2,6 +2,7 @@ from dataclasses import dataclass
 import json
 import os
 from typing import Protocol, Sequence
+from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .models import PhysicalStop
@@ -10,6 +11,7 @@ from .types import RouteEndpoint
 
 DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
 DEFAULT_OSRM_TIMEOUT_SECONDS = 15.0
+DEFAULT_OSRM_MAX_LOCATIONS = 100
 
 
 @dataclass(frozen=True)
@@ -47,15 +49,38 @@ def _configured_osrm_timeout() -> float:
     return value if value > 0 else DEFAULT_OSRM_TIMEOUT_SECONDS
 
 
+def _configured_osrm_max_locations() -> int:
+    raw = os.getenv("OTIMIZER_OSRM_MAX_LOCATIONS")
+    if raw is None:
+        return DEFAULT_OSRM_MAX_LOCATIONS
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_OSRM_MAX_LOCATIONS
+    return max(2, value)
+
+
 class OSRMRoutingProvider:
     """Routing provider backed by the OSRM Table API."""
 
-    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None) -> None:
+    def __init__(
+        self,
+        *,
+        timeout_seconds: float | None = None,
+        base_url: str | None = None,
+        max_locations: int | None = None,
+    ) -> None:
         self.timeout_seconds = _configured_osrm_timeout() if timeout_seconds is None else timeout_seconds
         self.base_url = _configured_osrm_base_url() if base_url is None else base_url
+        self.max_locations = _configured_osrm_max_locations() if max_locations is None else max(2, max_locations)
 
     def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
-        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url)
+        return fetch_osrm_table(
+            list(locations),
+            timeout_seconds=self.timeout_seconds,
+            base_url=self.base_url,
+            max_locations=self.max_locations,
+        )
 
 
 def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
@@ -106,8 +131,15 @@ def fetch_osrm_table(
     locations: list[PhysicalStop | RouteEndpoint],
     timeout_seconds: float = DEFAULT_OSRM_TIMEOUT_SECONDS,
     base_url: str = DEFAULT_OSRM_BASE_URL,
+    max_locations: int = DEFAULT_OSRM_MAX_LOCATIONS,
 ) -> tuple[tuple[TravelMetric | None, ...], ...]:
     """Fetch a road-network matrix from OSRM without hiding unreachable pairs."""
+    if not locations:
+        raise ValueError("At least one location is required")
+    if len(locations) > max_locations:
+        raise RoutingError(
+            f"Routing request contains {len(locations)} locations; maximum is {max_locations}"
+        )
     url = build_osrm_table_url(locations, base_url=base_url)
     request = Request(url, headers={"Accept": "application/json", "User-Agent": "Otimizer/0.1"})
     try:
