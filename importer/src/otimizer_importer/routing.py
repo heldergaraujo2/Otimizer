@@ -5,15 +5,7 @@ from urllib.parse import quote
 from urllib.request import Request, urlopen
 
 from .models import PhysicalStop
-
-
-@dataclass(frozen=True)
-class RouteEndpoint:
-    """A geographic endpoint that is not itself a delivery stop."""
-
-    latitude: float
-    longitude: float
-    id: str = "endpoint"
+from .types import RouteEndpoint
 
 
 @dataclass(frozen=True)
