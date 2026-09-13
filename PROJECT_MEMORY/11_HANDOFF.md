@@ -6,9 +6,15 @@
 
 ## Objetivo do produto
 
-Transformar planilhas XLSX de entregas em uma rota real otimizada por rede viária, preservando 100% das entregas válidas:
+Transformar planilhas XLSX de entregas em uma rota real otimizada por rede viária, preservando 100% das entregas válidas e buscando a localização física mais precisa possível:
 
-XLSX -> importação -> validação -> Delivery -> PhysicalStop -> matriz rodoviária -> otimização -> sequência -> mapa -> detalhes -> navegação.
+XLSX -> importação -> validação -> Delivery -> evidências de endereço -> resolução cadastral/geográfica -> PhysicalStop -> matriz rodoviária -> otimização -> sequência -> mapa -> detalhes -> navegação.
+
+## Estratégia geográfica
+
+O desenvolvimento inicial será concentrado em Goiânia para permitir validação com dados cadastrais/geográficos reais, mas o núcleo não pode depender de Goiânia. A arquitetura deve permitir providers específicos por cidade/estado posteriormente.
+
+Foram identificadas fontes oficiais da Prefeitura de Goiânia com dados de lotes, quadras e camadas de Número Predial Oficial, Segmento de Logradouro e Logradouro. Essas fontes serão usadas como base para o futuro `GoianiaLocationProvider`, sem colocar dados cadastrais reais de clientes no repositório.
 
 ## Regras de domínio que NÃO podem ser quebradas
 
@@ -16,7 +22,11 @@ XLSX -> importação -> validação -> Delivery -> PhysicalStop -> matriz rodovi
 - `Sequence` e `Stop` da planilha são informativos; nunca usar esses campos para decidir inclusão ou ordem final.
 - Delivery nunca é mesclada nessa camada.
 - PhysicalStop representa uma localização física e pode conter várias Deliveries.
-- Coordenadas iguais podem ser agrupadas em um PhysicalStop; coordenadas diferentes permanecem separadas.
+- Coordenadas iguais podem ser agrupadas em um PhysicalStop; coordenadas diferentes permanecem separadas, salvo reconciliação segura por evidências de localização.
+- Quadra/Lote são opcionais. Número residencial também é opcional.
+- O endereço original nunca deve ser destruído ou substituído pelo valor parseado.
+- Toda evidência disponível deve poder participar da resolução: GPS, endereço, número, quadra, lote, CEP, bairro, cidade e complemento.
+- Localização da propriedade e ponto de acesso viário são conceitos distintos; o sistema não deve fingir que o GPS da planilha já é o ponto ideal de parada do veículo.
 - Todo PhysicalStop roteado recebe exatamente uma sequência contígua começando em 1.
 - Nenhum PhysicalStop válido pode desaparecer da rota.
 - Entregas válidas e paradas físicas precisam ser contabilizadas separadamente.
@@ -30,6 +40,7 @@ Os três XLSX de referência foram lidos no ambiente de execução. São 293 lin
 - Caso 37 entregas: 35 PhysicalStops; 14 linhas sem Sequence/Stop.
 - Caso 131 entregas: 90 PhysicalStops; maior agrupamento = 8 entregas.
 - Há duplicidades reais de coordenadas nos três casos.
+- Os arquivos reais não possuem colunas separadas obrigatórias de Quadra/Lote; essas informações aparecem embutidas em `Destination Address` em vários formatos.
 
 Detalhes agregados e seguros estão em `PROJECT_MEMORY/12_REAL_XLSX_VALIDATION.md`.
 
@@ -40,13 +51,15 @@ Detalhes agregados e seguros estão em `PROJECT_MEMORY/12_REAL_XLSX_VALIDATION.m
 `importer/src/otimizer_importer/`
 
 - `models.py`: Delivery, PhysicalStop, OptimizedRouteStop, Route, ImportResult.
-- `xlsx.py`: importação e auditoria das linhas.
-- `stops.py`: agrupamento inicial por coordenada.
-- `routing.py`: TravelMetric, RoutingProvider, OSRMRoutingProvider e matriz OSRM.
+- `address_parser.py`: parser brasileiro conservador para número, Quadra e Lote e normalização de endereço.
+- `xlsx.py`: importação e auditoria das linhas; agora enriquece Delivery com evidências extraídas do endereço.
+- `location.py`: abstração `LocationDataProvider`, `LocationEvidence`, `ResolvedLocation` e fallback seguro para GPS original.
+- `stops.py`: agrupamento por coordenada com reconciliação conservadora por endereço/Quadra/Lote.
+- `routing.py`: TravelMetric, RoutingProvider, OSRMRoutingProvider e matriz OSRM com batching.
 - `types.py`: tipos compartilhados como OptimizationObjective e RouteEndpoint.
 - `optimizer.py` / `optimization.py`: otimização determinística; rotas maiores usam greedy + 2-opt.
 - `metrics.py`: métricas das pernas e totais usando a mesma matriz da otimização.
-- `service.py`: pipeline de aplicação completo.
+- `service.py`: pipeline de aplicação completo e invariantes de cobertura.
 
 ### Backend
 
@@ -57,6 +70,7 @@ FastAPI em `backend/src/otimizer_api/main.py`.
 - Limite de upload configurável.
 - Erros HTTP tratados para arquivo grande, entrada inválida e falha de roteamento.
 - Contrato retorna resumo, pendências, paradas, entregas e pernas.
+- Quadra/Lote já podem ser expostos na entrega; a próxima evolução é expor também evidências de localização/resolução.
 
 ### Frontend
 
@@ -74,38 +88,36 @@ FastAPI em `backend/src/otimizer_api/main.py`.
 - Botão `SEGUIR PARA A PRÓXIMA`.
 - Tratamento de loading, 413, 422, 502 e falha de conexão sem destruir a rota anterior.
 
-## CI confirmado
+## CI
 
-O GitHub Actions confirmou sucesso nos workflows de Backend e Frontend no commit `f9bb44e8b23b10970be36478666163e847b70700`. O importer também possui execução verde confirmada em histórico anterior.
+No momento do fechamento desta fase, os workflows `Importer tests` e `Frontend tests` para o commit `fbae392503099a0f1b14c7918777f090e3a1c6a0` foram disparados por push e estavam em estado `queued`. Não declarar sucesso antes de consultar novamente.
 
-Não afirmar CI verde para commits posteriores sem consultar novamente as execuções.
+## Commits recentes importantes desta fase
 
-## Commits recentes importantes
-
-- `a650b4d9be7bf49e6e3f811ae98ad3e2c5d883c7` — 2-opt para rotas maiores.
-- `0c2c6a7fd46c4dbe05abe439657bd6d4ad952ed0` — testes alinhados à abstração canônica de routing provider.
-- `d9119902a616772d77985d40b884bf2abbc18e21` — rejeição de workbook sem deliveries válidas.
-- `15b04685117ff3c812fc3567037222b1ebf9aea5` — erros claros de API para rotas inválidas.
-- `9b259a1ad1e8e811c9bb41f54d54466c5c3d0caf` — testes de edge cases da API/routing.
-- `b3e7cd8d5cf3d37e0e6745f9fe23b99e06384e4f` — hardening de estado do frontend.
-- `f9bb44e8b23b10970be36478666163e847b70700` — estados visuais do frontend; CI verde confirmado.
-- `2672073648c27738c32322ddd2912c74a6b4fc90` — registro da validação dos XLSX reais.
-
-## Ponto de atenção conhecido
-
-Existe ainda `importer/src/otimizer_importer/provider.py`, uma abstração legada paralela. Testes já foram alinhados ao `routing.py` canônico, mas não declarar que o arquivo legado foi removido. Se for consolidar isso, primeiro inspecionar dependências e depois remover/substituir com segurança.
+- `7410249f8059d60d22b6fd2a0fc931d46934e906` — parser brasileiro de evidências de endereço.
+- `e04ff96f49bdace7216b227d509aa585e776b752` — campos enriquecidos de endereço em Delivery.
+- `f24866113fd0ed2ecae96dd12991165c96364297` — parser integrado à importação XLSX.
+- `056cecb23ecfe53507c6f0c18daf7f8931cd8141` — testes sintéticos do parser.
+- `2a215485124b138c82f0b574d865db67ee388088` — abstração de resolução de localização.
+- `fbae392503099a0f1b14c7918777f090e3a1c6a0` — exports públicos das abstrações de localização.
 
 ## Próxima sequência recomendada
 
-1. Criar/fortalecer uma regressão automatizada que represente os três casos reais usando apenas dados anonimizados/agregados.
-2. Testar o contrato HTTP completo com provider fake nos tamanhos 37, 125 e 131, garantindo preservação de todas as deliveries e PhysicalStops.
-3. Medir performance de matriz + otimização para 35/61/90 stops.
-4. Executar OSRM real quando houver ambiente de rede disponível e registrar somente métricas, nunca dados pessoais.
-5. Evoluir agrupamento de PhysicalStop para tolerância a GPS jitter/endereço, sem mesclar propriedades indevidamente.
-6. Evoluir constraints operacionais e solver somente depois de estabilizar o pipeline base.
+1. Confirmar CI do commit `fbae392...` e corrigir regressões, se houver.
+2. Criar `GoianiaLocationProvider` real, começando pela camada oficial de Número Predial/Lotes/Quadras/Logradouros.
+3. Criar cache/index local das geometrias para evitar depender de chamadas remotas a cada entrega.
+4. Implementar resolução por evidências com score de confiança e manter GPS original, ponto da propriedade e ponto de acesso separados.
+5. Criar testes sintéticos de resolução para: somente número; quadra+lote; quadra+lote+número; endereço+GPS; GPS com pequena divergência; endereço incompleto.
+6. Integrar localização resolvida ao PhysicalStop e depois ao routing, sem perder a coordenada original.
+7. Medir precisão e performance em Goiânia antes de criar providers para outras cidades/estados.
+8. Depois estabilizar constraints operacionais, solver e demais funcionalidades avançadas.
+
+## Ponto de atenção conhecido
+
+Existe ainda `importer/src/otimizer_importer/provider.py`, uma abstração legada paralela. Testes já foram alinhados ao `routing.py` canônico, mas não declarar que o arquivo legado foi removido.
 
 ## Instruções para o próximo chat
 
 Não recomeçar o projeto. Primeiro ler este arquivo, `08_CURRENT_STATE.md`, `09_DECISIONS.md`, `10_TESTS.md` e a implementação atual. Depois consultar os últimos commits/workflows no GitHub. Ao receber `Prossiga`, escolher a próxima etapa acima e implementar de fato, fazendo commit real no GitHub quando possível.
 
-Nunca inventar execução, resultado, commit ou CI. Nunca expor dados reais das planilhas em documentação/testes. 
+Nunca inventar execução, resultado, commit ou CI. Nunca expor dados reais das planilhas em documentação/testes.
