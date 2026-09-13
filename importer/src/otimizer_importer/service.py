@@ -40,11 +40,16 @@ class OptimizationServiceResult:
 
     @property
     def coverage_complete(self) -> bool:
+        """Whether every eligible delivery and physical stop is routed."""
         return (
-            self.pending_count == 0
-            and self.routed_delivery_count == self.eligible_delivery_count
+            self.routed_delivery_count == self.eligible_delivery_count
             and self.routed_stop_count == self.physical_stop_count
         )
+
+    @property
+    def fully_resolved(self) -> bool:
+        """Whether coverage is complete and there are no unresolved rows."""
+        return self.coverage_complete and self.pending_count == 0
 
 
 def optimize_deliveries_file(
@@ -76,11 +81,10 @@ def optimize_deliveries_file(
         objective=objective,
     )
     result = optimize(problem)
-    stop_matrix = problem.matrix
     route_metrics = calculate_route_metrics(
         result.route,
         list(physical_stops),
-        stop_matrix,
+        problem.matrix,
         return_to_start=result.return_to_start,
         origin_id=result.origin.id if result.origin is not None else None,
         origin_metric=result.origin_metric,
