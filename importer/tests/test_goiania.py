@@ -24,19 +24,19 @@ def test_goiania_provider_ignores_other_cities():
 
 def test_representative_point_from_polygon():
     point = _representative_point({"rings": [[[1, 2], [3, 2], [3, 4], [1, 4], [1, 2]]]})
-    assert point == (2.2, 2.8)
+    assert point == (2.0, 3.0)
 
 
 def test_representative_point_handles_missing_geometry():
     assert _representative_point({}) is None
 
 
-def test_provider_maps_cadastral_feature(monkeypatch):
+def test_provider_maps_nearest_cadastral_feature(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     monkeypatch.setattr(
         provider,
-        "_query_layer",
-        lambda layer_id, evidence, out_fields: [
+        "_query_lots",
+        lambda evidence: [
             {
                 "attributes": {"id": "LOT-123"},
                 "geometry": {
