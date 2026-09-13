@@ -14,7 +14,7 @@ from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
 from otimizer_api.auth import AuthenticationService
 from otimizer_api.licensing import LicenseAuthorizer
-from otimizer_api.payments import PaymentService, PaymentStatus
+from otimizer_api.payments import PaymentService
 
 DEFAULT_MAX_UPLOAD_BYTES = 10 * 1024 * 1024
 
@@ -64,6 +64,26 @@ def _serialize_charge(charge) -> dict:
         "expires_at": charge.expires_at.isoformat(),
         "pix_copy_paste": charge.pix_copy_paste,
         "status": charge.status.value,
+    }
+
+
+def _serialize_license(license_record, now=None) -> dict:
+    from datetime import datetime, timezone
+
+    current = now or datetime.now(timezone.utc)
+    return {
+        "license_id": license_record.license_id,
+        "account_id": license_record.account_id,
+        "starts_at": license_record.starts_at.isoformat(),
+        "expires_at": license_record.expires_at.isoformat(),
+        "active": license_record.is_active(current),
+        "revoked": license_record.revoked_at is not None,
+        "price_cents": license_record.price_cents,
+        "entitlements": {
+            "route_optimization": license_record.entitlements.route_optimization,
+            "max_devices": license_record.entitlements.max_devices,
+            "max_routes_per_day": license_record.entitlements.max_routes_per_day,
+        },
     }
 
 
@@ -174,6 +194,17 @@ def create_app(
         if not auth_service.logout(authorization):
             raise HTTPException(status_code=401, detail="Authentication is required")
         return {"logged_out": True}
+
+    @api.get("/licenses/me")
+    def my_license(authorization: Annotated[str | None, Header()] = None) -> dict:
+        account = authenticated_account(authorization)
+        if license_authorizer is None:
+            raise HTTPException(status_code=503, detail="Licensing is not configured")
+        license_repository = license_authorizer.repository
+        license_record = license_repository.get_active_license(account.account_id, __import__("datetime").datetime.now(__import__("datetime").timezone.utc))
+        if license_record is None:
+            return {"active": False, "license": None}
+        return {"active": True, "license": _serialize_license(license_record)}
 
     @api.post("/payments/pix")
     def create_pix_charge(
