@@ -30,6 +30,10 @@ _NUMBER_FALLBACK_RE = re.compile(
     r"\b(\d+[a-z]?(?:[-/]\d+)?)\b",
     re.IGNORECASE,
 )
+_LOCATION_MARKED_NUMBER_RE = re.compile(
+    r"\b(?:q(?:d|uadra)?|l(?:t|ote)?)\s*[:.=\-]?\s*[a-z0-9]+(?:[./-][a-z0-9]+)*",
+    re.IGNORECASE,
+)
 
 
 def normalize_address(value: str | None) -> str | None:
@@ -50,32 +54,23 @@ def _extract_field(pattern: re.Pattern[str], text: str) -> str | None:
 
 
 def _extract_number(text: str) -> str | None:
-    # Prefer the numeric address segment after a comma/semicolon. This avoids
-    # treating a street code such as "Rua PA 9" as the house number when the
-    # actual number follows it ("Rua PA 9, 49, ...").
     match = _NUMBER_AFTER_SEPARATOR_RE.search(text)
     if match:
         return match.group(1)
 
-    # "S/N", "SN" and "SEM NUMERO" explicitly mean that no house number is
-    # available. They are not treated as numeric evidence.
     upper = re.sub(r"[^A-Z0-9/]+", " ", text.upper())
     if re.search(r"\bS\s*/\s*N\b|\bSN\b|\bSEM\s+NUMERO\b", upper):
         return None
 
-    # Fallback for formats such as "Rua X 123" where no comma separates the
-    # house number. Explicit Q/Qd/Lt/Lote markers are ignored by design.
-    match = _NUMBER_FALLBACK_RE.search(text)
+    # Do not mistake the numeric value belonging to Q/Qd/Quadra/Lt/Lote for
+    # the house number when no comma-separated house-number segment exists.
+    unmarked = _LOCATION_MARKED_NUMBER_RE.sub(" ", text)
+    match = _NUMBER_FALLBACK_RE.search(unmarked)
     return match.group(1) if match else None
 
 
 def parse_address(value: str | None) -> ParsedAddress:
-    """Extract optional house number, Quadra and Lote from free-form text.
-
-    The parser is deliberately conservative: it extracts only recognizable
-    location markers, preserves the original address, and never requires a
-    particular combination of fields.
-    """
+    """Extract optional house number, Quadra and Lote from free-form text."""
     original = value.strip() if value and value.strip() else None
     if original is None:
         return ParsedAddress(None, None, None, None, None)
