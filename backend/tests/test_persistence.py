@@ -95,7 +95,7 @@ def test_sqlite_settlement_updates_payment_and_license_atomically(tmp_path):
 
     activated = service.settle_confirmed_payment(charge.payment_id, now=now)
 
-    assert activated.expires_at == now + timedelta(days=30)
+    assert activated.expires_at == license_record.expires_at + timedelta(days=30)
     assert licenses.get_by_id("license-1") == activated
     settled = payments.get(charge.payment_id)
     assert settled is not None
