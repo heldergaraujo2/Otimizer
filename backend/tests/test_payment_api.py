@@ -61,7 +61,8 @@ def test_authenticated_user_cannot_create_charge_for_another_account_license():
 
 
 def test_authenticated_user_can_read_only_own_payment():
-    client, payments = make_app()
+    app, payments = make_app()
+    client = TestClient(app)
     headers = bearer_headers(client)
     created = client.post("/payments/pix", headers=headers, json={"license_id": "lic-1"})
     payment_id = created.json()["payment_id"]
