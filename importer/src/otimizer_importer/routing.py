@@ -1,8 +1,10 @@
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
+from collections import OrderedDict
 import json
 import math
 import os
+from threading import RLock
 from typing import Protocol, Sequence
 from urllib.request import Request, urlopen
 
@@ -14,6 +16,7 @@ DEFAULT_OSRM_BASE_URL = "https://router.project-osrm.org"
 DEFAULT_OSRM_TIMEOUT_SECONDS = 15.0
 DEFAULT_OSRM_MAX_LOCATIONS = 100
 DEFAULT_OSRM_MAX_CONCURRENT_REQUESTS = 4
+DEFAULT_OSRM_CACHE_ENTRIES = 8
 
 
 @dataclass(frozen=True)
@@ -74,16 +77,45 @@ def _configured_osrm_max_concurrent_requests() -> int:
     return max(1, value)
 
 
+def _configured_osrm_cache_entries() -> int:
+    raw = os.getenv("OTIMIZER_OSRM_CACHE_ENTRIES")
+    if raw is None:
+        return DEFAULT_OSRM_CACHE_ENTRIES
+    try:
+        value = int(raw)
+    except ValueError:
+        return DEFAULT_OSRM_CACHE_ENTRIES
+    return max(0, value)
+
+
 class OSRMRoutingProvider:
-    """Routing provider backed by the OSRM Table API."""
-    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None, max_locations: int | None = None, max_concurrent_requests: int | None = None):
+    """Routing provider backed by the OSRM Table API with a bounded LRU cache."""
+    def __init__(self, *, timeout_seconds: float | None = None, base_url: str | None = None, max_locations: int | None = None, max_concurrent_requests: int | None = None, cache_entries: int | None = None):
         self.timeout_seconds = _configured_osrm_timeout() if timeout_seconds is None else timeout_seconds
         self.base_url = _configured_osrm_base_url() if base_url is None else base_url
         self.max_locations = _configured_osrm_max_locations() if max_locations is None else max(2, max_locations)
         self.max_concurrent_requests = _configured_osrm_max_concurrent_requests() if max_concurrent_requests is None else max(1, max_concurrent_requests)
+        self.cache_entries = _configured_osrm_cache_entries() if cache_entries is None else max(0, cache_entries)
+        self._cache: OrderedDict[tuple[tuple[float, float], ...], tuple[tuple[TravelMetric | None, ...], ...]] = OrderedDict()
+        self._cache_lock = RLock()
 
     def table(self, locations: Sequence[PhysicalStop | RouteEndpoint]) -> tuple[tuple[TravelMetric | None, ...], ...]:
-        return fetch_osrm_table(list(locations), timeout_seconds=self.timeout_seconds, base_url=self.base_url, max_locations=self.max_locations, max_concurrent_requests=self.max_concurrent_requests)
+        location_list = list(locations)
+        key = tuple(_location_key(location) for location in location_list)
+        if self.cache_entries:
+            with self._cache_lock:
+                cached = self._cache.get(key)
+                if cached is not None:
+                    self._cache.move_to_end(key)
+                    return cached
+        result = fetch_osrm_table(location_list, timeout_seconds=self.timeout_seconds, base_url=self.base_url, max_locations=self.max_locations, max_concurrent_requests=self.max_concurrent_requests)
+        if self.cache_entries:
+            with self._cache_lock:
+                self._cache[key] = result
+                self._cache.move_to_end(key)
+                while len(self._cache) > self.cache_entries:
+                    self._cache.popitem(last=False)
+        return result
 
 
 def _coordinates(locations: Sequence[PhysicalStop | RouteEndpoint]) -> str:
