@@ -115,3 +115,42 @@ def test_large_return_route_preserves_return_to_start_cost():
     assert result.route.delivery_count == 13
     assert result.return_to_start is True
     assert result.route.stops[0].id == "stop-0"
+
+
+def test_large_sparse_route_falls_back_when_regret_insertion_is_infeasible():
+    stops = tuple(stop(index) for index in range(13))
+    size = len(stops)
+    matrix = [[None] * size for _ in range(size)]
+    for index in range(size):
+        matrix[index][index] = TravelMetric(0, 0)
+
+    # This directed road graph has one valid complete route for greedy
+    # construction, while regret insertion can reach an intermediate partial
+    # order with no feasible insertion. The optimizer must keep the valid
+    # greedy seed instead of failing the entire optimization.
+    sparse_edges = {
+        (0, 1): 2,
+        (0, 2): 2,
+        (1, 0): 10,
+        (1, 2): 10,
+        (2, 0): 2,
+        (2, 1): 3,
+        (2, 3): 10,
+        (3, 0): 10,
+    }
+    for index in range(3, size - 1):
+        sparse_edges[index, index + 1] = 1
+    for (left, right), cost in sparse_edges.items():
+        matrix[left][right] = TravelMetric(cost, cost)
+
+    problem = OptimizationProblem(
+        stops=stops,
+        matrix=tuple(tuple(row) for row in matrix),
+        objective=OptimizationObjective.TIME,
+    )
+
+    result = optimize(problem)
+
+    assert result.route.physical_stop_count == 13
+    assert result.route.delivery_count == 13
+    assert [item.id for item in result.route.stops] == [f"stop-{index}" for index in range(13)]
