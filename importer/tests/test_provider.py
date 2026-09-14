@@ -49,6 +49,63 @@ def test_osrm_provider_is_configurable():
     assert provider.timeout_seconds == 3.5
 
 
+def test_osrm_provider_caches_identical_table_requests(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def read(self):
+            return b'{"code":"Ok","distances":[[0,100],[100,0]],"durations":[[0,10],[10,0]]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(request, timeout):
+        calls.append((request.full_url, timeout))
+        return FakeResponse()
+
+    monkeypatch.setattr("otimizer_importer.routing.urlopen", fake_urlopen)
+    provider = OSRMRoutingProvider(base_url="https://example.test/router", cache_entries=2)
+    locations = [RouteEndpoint(-16.70, -49.20, "a"), RouteEndpoint(-16.71, -49.21, "b")]
+
+    first = provider.table(locations)
+    second = provider.table(locations)
+
+    assert first == second
+    assert len(calls) == 1
+
+
+def test_osrm_provider_cache_is_bounded_lru(monkeypatch):
+    calls = []
+
+    class FakeResponse:
+        def read(self):
+            return b'{"code":"Ok","distances":[[0]],"durations":[[0]]}'
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+    def fake_urlopen(request, timeout):
+        calls.append(request.full_url)
+        return FakeResponse()
+
+    monkeypatch.setattr("otimizer_importer.routing.urlopen", fake_urlopen)
+    provider = OSRMRoutingProvider(base_url="https://example.test/router", cache_entries=1)
+    first = [RouteEndpoint(-16.70, -49.20, "a")]
+    second = [RouteEndpoint(-16.71, -49.21, "b")]
+
+    provider.table(first)
+    provider.table(second)
+    provider.table(first)
+
+    assert len(calls) == 3
+
+
 def test_provider_receives_endpoints_and_stops_in_route_matrix_order():
     matrix = tuple(tuple(TravelMetric(0, 0) for _ in range(3)) for _ in range(3))
     provider = FakeRoutingProvider(matrix)
