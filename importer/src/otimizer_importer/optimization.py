@@ -418,18 +418,35 @@ def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
     selected = ranked[:limit]
     if len(reachable) > limit:
         step = max(1, len(ranked) // limit)
-        selected.extend(ranked[::step][:limit])
-    return tuple(dict.fromkeys(selected))
+        for index in ranked[::step]:
+            if index not in selected:
+                selected.append(index)
+            if len(selected) >= limit:
+                break
+    return tuple(selected)
 
 
-def _optimize_order(problem, starts):
-    if len(problem.stops) <= 12:
-        return _exact_order(problem.stops, problem.matrix, starts, problem.objective, problem.origin_metrics, problem.destination_metrics, problem.return_to_start)
+def _optimize_order(problem: OptimizationProblem):
+    size = len(problem.stops)
+    if size == 0:
+        return ()
+    if size <= 12:
+        starts = _heuristic_starts(problem) if problem.origin_metrics is not None else (problem.start_index,)
+        return _exact_order(
+            problem.stops,
+            problem.matrix,
+            starts,
+            problem.objective,
+            problem.origin_metrics,
+            problem.destination_metrics,
+            problem.return_to_start,
+        )
 
+    starts = _heuristic_starts(problem)
     best = None
     for start in starts:
-        seeds = (
-            _greedy_order(
+        try:
+            greedy_seed = _greedy_order(
                 problem.stops,
                 problem.matrix,
                 (start,),
@@ -437,41 +454,56 @@ def _optimize_order(problem, starts):
                 problem.origin_metrics,
                 problem.destination_metrics,
                 problem.return_to_start,
-            ),
-            _regret_insertion_order(problem, start),
-        )
+            )
+        except OptimizationError:
+            greedy_seed = None
+
+        seeds = (greedy_seed,) if greedy_seed is not None else ()
+        try:
+            regret_seed = _regret_insertion_order(problem, start)
+        except OptimizationError:
+            regret_seed = None
+        if regret_seed is not None:
+            seeds = seeds + (regret_seed,)
+
         for seed in seeds:
             improved = _two_opt(seed, problem)
             cost = _order_cost(improved, problem)
             if cost is None:
                 continue
-            candidate = (cost, tuple(improved))
+            candidate = (cost, improved)
             if best is None or candidate < best:
                 best = candidate
+
     if best is None:
         raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
     return best[1]
 
 
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
-    """Optimize the complete road trip while preserving every physical stop."""
-    if not problem.stops:
-        return OptimizationResult(Route.from_physical_stops([]), problem.objective, None, False, problem.origin, problem.destination)
-    starts = _heuristic_starts(problem) if problem.origin is not None else (problem.start_index,)
-    if not starts:
-        raise OptimizationError("No road-network path reaches a physical stop from the origin")
-    order = _optimize_order(problem, starts)
-    route = Route.from_physical_stops([problem.stops[index] for index in order])
-    origin_metric = problem.origin_metrics[order[0]] if problem.origin is not None else None
-    destination_metric = problem.destination_metrics[order[-1]] if problem.destination is not None else None
-    if problem.destination is not None and destination_metric is None:
-        raise OptimizationError("Route cannot reach the destination from its final physical stop")
-    return OptimizationResult(
-        route, problem.objective,
-        order[0] if problem.origin is None else None,
-        problem.return_to_start if problem.origin is None else False,
-        problem.origin, problem.destination, origin_metric, destination_metric,
+    """Optimize physical-stop order and return a validated route result."""
+    order = _optimize_order(problem)
+    ordered_stops = tuple(problem.stops[index] for index in order)
+    origin_metric = None
+    if problem.origin_metrics is not None:
+        origin_metric = problem.origin_metrics[order[0]]
+    destination_metric = None
+    if problem.destination_metrics is not None:
+        destination_metric = problem.destination_metrics[order[-1]]
+
+    route = Route(
+        stops=ordered_stops,
+        objective=problem.objective,
+        start_index=0 if ordered_stops else None,
+        return_to_start=problem.return_to_start,
     )
-
-
-__all__ = ["OptimizationError", "OptimizationObjective", "OptimizationProblem", "OptimizationResult", "RouteEndpoint", "optimize"]
+    return OptimizationResult(
+        route=route,
+        objective=problem.objective,
+        start_index=problem.start_index if ordered_stops else None,
+        return_to_start=problem.return_to_start,
+        origin=problem.origin,
+        destination=problem.destination,
+        origin_metric=origin_metric,
+        destination_metric=destination_metric,
+    )
