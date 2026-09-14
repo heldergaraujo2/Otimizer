@@ -90,9 +90,9 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
 
     monkeypatch.setattr(routing, "urlopen", fake_urlopen)
     matrix = routing.fetch_osrm_table(locations, max_locations=3)
-    assert len(requests) == 11
+    assert len(requests) == 15
     assert all(len(request[2]) <= 3 for request in requests)
-    assert sum(1 for request in requests if request[0] == [0, 1] and request[1] == [0, 1]) == 2
+    assert sum(1 for request in requests if request[0] == [0, 1] and request[1] == [0, 1]) == 1
     assert len(matrix) == 5
     assert all(len(row) == 5 for row in matrix)
     assert all(value is not None for row in matrix for value in row)
