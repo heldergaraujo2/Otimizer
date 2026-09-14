@@ -15,9 +15,14 @@ on:
 permissions:
   contents: read
 
+concurrency:
+  group: importer-tests-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   test-importer:
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     defaults:
       run:
         working-directory: importer
