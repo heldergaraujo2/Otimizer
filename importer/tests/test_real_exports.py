@@ -48,3 +48,5 @@ def test_real_xlsx_exports_preserve_delivery_accounting(
     assert sum(len(stop.deliveries) for stop in stops) == delivery_count
     assert all(stop.deliveries for stop in stops)
     assert len({delivery.row_number for delivery in result.deliveries}) == delivery_count
+    assert all(-90 <= delivery.latitude <= 90 for delivery in result.deliveries)
+    assert all(-180 <= delivery.longitude <= 180 for delivery in result.deliveries)
