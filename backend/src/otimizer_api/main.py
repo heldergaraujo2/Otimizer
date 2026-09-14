@@ -47,7 +47,7 @@ def _cors_origins() -> list[str]:
         origins = [origin.strip() for origin in raw.split(",") if origin.strip()]
         if origins:
             return origins
-    return ["http://localhost:3000", "http://localhost:5173"]
+    return ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080"]
 
 
 def _endpoint(latitude: float | None, longitude: float | None, name: str) -> RouteEndpoint | None:
