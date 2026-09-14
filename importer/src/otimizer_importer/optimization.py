@@ -318,6 +318,86 @@ def _greedy_order(stops, matrix, starts, objective, origin_metrics, destination_
     return best[1]
 
 
+def _regret_insertion_order(problem: OptimizationProblem, start: int):
+    """Build a route by repeatedly inserting the stop with highest regret."""
+    size = len(problem.stops)
+    remaining = set(range(size))
+    remaining.remove(start)
+    order = [start]
+
+    while remaining:
+        choices = []
+        for candidate in sorted(remaining):
+            insertion_options = []
+            for position in range(1, len(order) + 1):
+                if position < len(order):
+                    previous = order[position - 1]
+                    following = order[position]
+                    old_metric = problem.matrix[previous][following]
+                    left_metric = problem.matrix[previous][candidate]
+                    right_metric = problem.matrix[candidate][following]
+                    if old_metric is None or left_metric is None or right_metric is None:
+                        continue
+                    delta = _subtract_cost(
+                        _add_cost(
+                            _metric_cost(left_metric, problem.objective),
+                            _metric_cost(right_metric, problem.objective),
+                        ),
+                        _metric_cost(old_metric, problem.objective),
+                    )
+                else:
+                    previous = order[-1]
+                    left_metric = problem.matrix[previous][candidate]
+                    if left_metric is None:
+                        continue
+                    delta = _metric_cost(left_metric, problem.objective)
+                    if problem.destination_metrics is not None:
+                        destination_metric = problem.destination_metrics[previous]
+                        candidate_destination = problem.destination_metrics[candidate]
+                        if destination_metric is None or candidate_destination is None:
+                            continue
+                        delta = _add_cost(
+                            delta,
+                            _subtract_cost(
+                                _metric_cost(candidate_destination, problem.objective),
+                                _metric_cost(destination_metric, problem.objective),
+                            ),
+                        )
+                    elif problem.return_to_start:
+                        old_return = problem.matrix[previous][start]
+                        candidate_return = problem.matrix[candidate][start]
+                        if old_return is None or candidate_return is None:
+                            continue
+                        delta = _add_cost(
+                            delta,
+                            _subtract_cost(
+                                _metric_cost(candidate_return, problem.objective),
+                                _metric_cost(old_return, problem.objective),
+                            ),
+                        )
+                insertion_options.append((delta, position))
+
+            if not insertion_options:
+                continue
+            insertion_options.sort(key=lambda option: (option[0], option[1]))
+            best_option = insertion_options[0]
+            second_cost = insertion_options[1][0] if len(insertion_options) > 1 else (float("inf"), float("inf"))
+            regret = _subtract_cost(second_cost, best_option[0])
+            choices.append((regret, best_option[0], candidate, best_option[1]))
+
+        if not choices:
+            raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
+
+        _, _, candidate, position = max(
+            choices,
+            key=lambda choice: (choice[0], _subtract_cost((0.0, 0.0), choice[1]), -choice[2]),
+        )
+        order.insert(position, candidate)
+        remaining.remove(candidate)
+
+    return tuple(order)
+
+
 def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
     """Choose bounded deterministic starts for large routes with a free origin."""
     if problem.origin_metrics is None:
@@ -348,22 +428,26 @@ def _optimize_order(problem, starts):
 
     best = None
     for start in starts:
-        greedy = _greedy_order(
-            problem.stops,
-            problem.matrix,
-            (start,),
-            problem.objective,
-            problem.origin_metrics,
-            problem.destination_metrics,
-            problem.return_to_start,
+        seeds = (
+            _greedy_order(
+                problem.stops,
+                problem.matrix,
+                (start,),
+                problem.objective,
+                problem.origin_metrics,
+                problem.destination_metrics,
+                problem.return_to_start,
+            ),
+            _regret_insertion_order(problem, start),
         )
-        improved = _two_opt(greedy, problem)
-        cost = _order_cost(improved, problem)
-        if cost is None:
-            continue
-        candidate = (cost, tuple(improved))
-        if best is None or candidate < best:
-            best = candidate
+        for seed in seeds:
+            improved = _two_opt(seed, problem)
+            cost = _order_cost(improved, problem)
+            if cost is None:
+                continue
+            candidate = (cost, tuple(improved))
+            if best is None or candidate < best:
+                best = candidate
     if best is None:
         raise OptimizationError("No complete road-network route satisfies the endpoint constraints")
     return best[1]
