@@ -41,11 +41,7 @@ def workbook_bytes(rows=None) -> bytes:
     sheet = workbook.active
     sheet.append(["AT ID", "Sequence", "Stop", "SPX TN", "Destination Address", "Bairro", "City", "Zipcode/Postal code", "Latitude", "Longitude"])
     if rows is None:
-        rows = [
-            ["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", -16.70, -49.25],
-            ["2", "2", "9", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26],
-            ["3", "1", "1", "TN-3", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26],
-        ]
+        rows = [["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", -16.70, -49.25], ["2", "2", "9", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26], ["3", "1", "1", "TN-3", "Rua B", "Centro", "Goiania", "74000-001", -16.71, -49.26]]
     for row in rows:
         sheet.append(row)
     output = BytesIO()
@@ -119,14 +115,20 @@ def test_optimize_preserves_workbook_rows_without_valid_coordinates():
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["imported_deliveries"] == 2
-    assert payload["summary"]["eligible_deliveries"] == 0
-    assert payload["summary"]["routed_deliveries"] == 0
+    assert payload["summary"]["eligible_deliveries"] == 2
+    assert payload["summary"]["routed_deliveries"] == 2
+    assert payload["summary"]["physical_stops"] == 2
+    assert payload["summary"]["routed_stops"] == 2
     assert payload["summary"]["pending"] == 2
     assert payload["summary"]["coverage_complete"] is True
+    assert payload["summary"]["routing_complete"] is False
     assert payload["summary"]["fully_resolved"] is False
     assert payload["unresolved_rows"] == [2, 3]
-    assert payload["route"] == []
-    assert payload["legs"] == []
+    assert len(payload["route"]) == 2
+    assert len(payload["legs"]) == 1
+    assert payload["legs"][0]["routable"] is False
+    assert payload["legs"][0]["distance_meters"] is None
+    assert payload["legs"][0]["duration_seconds"] is None
 
 
 def test_optimize_handles_all_deliveries_at_one_physical_stop():
@@ -163,9 +165,11 @@ def test_optimize_keeps_route_when_road_legs_are_unreachable():
     assert payload["summary"]["eligible_deliveries"] == 3
     assert payload["summary"]["routed_deliveries"] == 3
     assert payload["summary"]["coverage_complete"] is True
+    assert payload["summary"]["routing_complete"] is False
     assert payload["summary"]["fully_resolved"] is False
     assert len(payload["route"]) == 2
     assert len(payload["legs"]) == 1
+    assert payload["legs"][0]["routable"] is False
     assert payload["legs"][0]["distance_meters"] is None
     assert payload["legs"][0]["duration_seconds"] is None
 
