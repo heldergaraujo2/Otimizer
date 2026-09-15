@@ -24,6 +24,24 @@ Fluxo:
 - Custos de rota vêm da malha viária, não de distância em linha reta.
 - Todos os PhysicalStops válidos devem permanecer na rota e receber sequência contínua iniciando em 1.
 
+### Regra obrigatória de fallback para a rua correta
+
+Quando não for possível cravar com segurança o ponto exato da propriedade, **a parada não deve ser descartada nem ficar fora da otimização se a rua correta puder ser determinada com confiança suficiente**.
+
+A hierarquia operacional é:
+
+1. GPS válido e confiável → usar o ponto geográfico disponível.
+2. Quadra + lote e demais evidências → localizar a propriedade e tentar determinar o ponto de acesso viário.
+3. Propriedade localizada, mas acesso exato não determinado → procurar o trecho/face de logradouro correspondente ao lote.
+4. Ponto exato indisponível, mas rua correta identificada → colocar um **alfinete de fallback na rua correta**, preferencialmente no trecho relacionado ao endereço/lote, e manter a parada na matriz de roteamento e na otimização.
+5. Somente quando nem a rua correta puder ser determinada com confiança suficiente → manter a entrega como pendente de geolocalização, sem inventar coordenadas.
+
+O ponto de fallback deve ser identificado como **aproximado**. Ele não representa necessariamente a porta ou o centro do lote. Propriedade, acesso exato e ponto de fallback de rua são conceitos diferentes e devem ter nível de confiança/proveniência próprio.
+
+Objetivo operacional: permitir que o motorista chegue à **rua correta** e use quadra + lote e demais informações do endereço para encontrar a residência/propriedade, mesmo quando o sistema não consegue cravar o alfinete na porta.
+
+Princípio central: **uma entrega válida nunca deve ser perdida apenas porque o sistema não conseguiu determinar o ponto exato do imóvel.**
+
 ## Estado atual da implementação
 
 ### Importer
@@ -39,6 +57,7 @@ Fluxo:
 - Quando `bairro + quadra + lote` estão disponíveis, o lote cadastral é priorizado para identificar a propriedade, inclusive quando existe GPS na planilha.
 - O ponto cadastral da propriedade é usado para procurar candidato de acesso viário.
 - Quando a resolução não é confiável, a entrega permanece pendente em vez de ser perdida.
+- O fallback de rua correta é uma regra de negócio obrigatória a implementar/validar no fluxo cadastral quando a propriedade exata não puder ser cravada, mas a rua correta puder ser determinada com confiança suficiente.
 
 ### Routing
 
@@ -110,11 +129,13 @@ Após a correção, é obrigatório aguardar/consultar o novo CI antes de declar
 
 ## Roadmap
 
-O roadmap oficial foi criado em:
+O roadmap oficial está em:
 
 `PROJECT_MEMORY/10_ROADMAP.md`
 
 A próxima fase principal é **validação real no PC**, incluindo os três XLSX e o caso sem GPS. Depois vêm estabilização de produção, refinamento da precisão cadastral/acesso viário e, em seguida, a intervenção manual do motorista.
+
+O roadmap também contém a regra obrigatória de fallback para a rua correta quando o ponto exato da propriedade não puder ser determinado, mas a rua puder ser determinada com confiança suficiente.
 
 ### Intervenção manual do motorista — planejada, não implementar agora
 
@@ -133,9 +154,10 @@ A próxima fase principal é **validação real no PC**, incluindo os três XLSX
 3. Fazer o primeiro teste real completo no PC.
 4. Validar os três XLSX sem alterar os arquivos.
 5. Validar especificamente entregas sem GPS.
-6. Registrar resultados de deliveries, PhysicalStops, pontos roteados, pendências, distância, duração, localização, mapa e navegação.
-7. Corrigir somente falhas reais encontradas.
-8. Produzir relatório final de aceitação.
+6. Validar especificamente o fallback na rua correta para casos em que a propriedade exata não possa ser cravada.
+7. Registrar resultados de deliveries, PhysicalStops, pontos roteados, pendências, distância, duração, localização, nível de confiança, mapa e navegação.
+8. Corrigir somente falhas reais encontradas.
+9. Produzir relatório final de aceitação.
 
 ## O que ainda falta para o projeto ser considerado finalizado
 
@@ -145,6 +167,7 @@ A próxima fase principal é **validação real no PC**, incluindo os três XLSX
 - Teste manual completo no PC.
 - Validação dos três XLSX reais.
 - Validação do caso sem GPS válido.
+- Validação do fallback para a rua correta.
 - Repetibilidade da rota.
 - Verificação de mapa e navegação em uso real.
 - Medição de precisão da localização cadastral e do ponto de acesso.
@@ -153,6 +176,8 @@ A próxima fase principal é **validação real no PC**, incluindo os três XLSX
 ### Evolução técnica importante
 
 - Melhorar a escolha da face/acesso do lote quando os dados cadastrais oficiais permitirem.
+- Implementar/validar a seleção do trecho correto de rua para o fallback quando o ponto exato da propriedade não puder ser determinado.
+- Garantir que o ponto de fallback seja marcado como aproximado e não seja confundido com a porta do imóvel.
 - Cache/index local de geometrias quando necessário para performance.
 - Testes adicionais de evidências conflitantes/incompletas.
 - Teste de carga com arquivos maiores.
