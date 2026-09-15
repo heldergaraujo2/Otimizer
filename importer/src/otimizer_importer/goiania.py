@@ -1,4 +1,4 @@
-"""GoiÃ¢nia cadastral location provider."""
+"""Goiânia cadastral location provider."""
 
 from __future__ import annotations
 
@@ -21,13 +21,7 @@ STREET_SEGMENT_LAYER_ID = 7
 
 
 class GoianiaLocationProvider(LocationDataProvider):
-    """Resolve delivery evidence using GoiÃ¢nia cadastral data.
-
-    A municipal official property number is preferred when present. The
-    resolved property point is then projected onto the nearest municipal
-    street segment to create a vehicle-access candidate. This is deliberately
-    a candidate, not a claim that the vehicle can stop at the exact point.
-    """
+    """Resolve delivery evidence using Goiânia cadastral data."""
 
     def __init__(self, *, base_url: str = DEFAULT_FEATURE_BASE_URL, timeout_seconds: float = 5.0) -> None:
         self.base_url = base_url.rstrip("/")
@@ -47,6 +41,35 @@ class GoianiaLocationProvider(LocationDataProvider):
         return resolved
 
     def _resolve_uncached(self, evidence: LocationEvidence) -> ResolvedLocation | None:
+        # When parcel evidence is complete, the municipal cadastral lot is
+        # more authoritative for property identity than the spreadsheet GPS.
+        # Use it first even when GPS is present, because spreadsheet points can
+        # fall on the street, inside the parcel, or on an adjacent property.
+        if evidence.neighborhood and evidence.quadra and evidence.lote:
+            parcel_features = self._query_lot_by_parcel(evidence)
+            if parcel_features:
+                best = parcel_features[0]
+                property_point = _representative_point(best.get("geometry") or {})
+                if property_point is not None:
+                    attributes = best.get("attributes") or {}
+                    cadastral_id = attributes.get("id")
+                    access_point = self._nearest_street_access(property_point)
+                    if access_point is not None:
+                        return _resolved_with_access(
+                            property_point,
+                            access_point,
+                            confidence=0.94,
+                            source="goiania-cadastral-parcel-road-access",
+                            cadastral_id=cadastral_id,
+                        )
+                    return _resolved_with_access(
+                        property_point,
+                        None,
+                        confidence=0.90,
+                        source="goiania-cadastral-parcel",
+                        cadastral_id=cadastral_id,
+                    )
+
         if evidence.latitude is None or evidence.longitude is None:
             features = self._query_lot_by_parcel(evidence)
             if not features:
@@ -214,7 +237,6 @@ class GoianiaLocationProvider(LocationDataProvider):
             return []
         return payload.get("features") or []
 
-
     def _query_official_numbers(self, evidence: LocationEvidence) -> list[dict]:
         return self._query_layer_at_point(
             evidence.latitude,
@@ -229,12 +251,7 @@ class GoianiaLocationProvider(LocationDataProvider):
     def _nearest_street_access(
         self, property_point: tuple[float, float]
     ) -> tuple[float, float] | None:
-        """Find the nearest street candidate around the resolved property point.
-
-        The search is centered on the cadastral/property point rather than the
-        original XLSX GPS coordinate. This matters when the spreadsheet GPS is
-        on the parcel interior or has meaningful positional error.
-        """
+        """Find the nearest street candidate around the resolved property point."""
         longitude, latitude = property_point
         segments = self._query_street_segments(latitude, longitude)
         best: tuple[float, tuple[float, float]] | None = None
@@ -275,9 +292,7 @@ def _escape_where_value(value: object) -> str:
     return str(value).replace("'", "''")
 
 
-
 def _resolution_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
-    """Build a conservative key so incompatible address evidence never shares a result."""
     return (
         evidence.latitude,
         evidence.longitude,
@@ -377,5 +392,7 @@ def _nearest_point_on_segment(
 def _distance_sq_to_geometry(evidence: LocationEvidence, geometry: dict) -> float:
     point = _point_from_geometry(geometry) or _representative_point(geometry)
     if point is None:
+        return float("inf")
+    if evidence.longitude is None or evidence.latitude is None:
         return float("inf")
     return (point[0] - evidence.longitude) ** 2 + (point[1] - evidence.latitude) ** 2
