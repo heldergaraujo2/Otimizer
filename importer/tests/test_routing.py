@@ -48,16 +48,22 @@ def test_parse_osrm_table_rejects_wrong_matrix_size():
         parse_osrm_table(payload, expected_size=2)
 
 
-def test_parse_osrm_table_rejects_negative_metric():
+def test_parse_osrm_table_treats_negative_metric_as_unavailable_edge():
     payload = json.dumps({"code": "Ok", "distances": [[0, -1], [0, 0]], "durations": [[0, 1], [0, 0]]})
-    with pytest.raises(RoutingError, match="invalid metric"):
-        parse_osrm_table(payload, expected_size=2)
+    matrix = parse_osrm_table(payload, expected_size=2)
+    assert matrix[0][1] is None
 
 
-def test_parse_osrm_table_rejects_non_finite_metric():
+def test_parse_osrm_table_treats_non_finite_metric_as_unavailable_edge():
     payload = '{"code":"Ok","distances":[[0,NaN],[0,0]],"durations":[[0,1],[0,0]]}'
-    with pytest.raises(RoutingError, match="invalid metric"):
-        parse_osrm_table(payload, expected_size=2)
+    matrix = parse_osrm_table(payload, expected_size=2)
+    assert matrix[0][1] is None
+
+
+def test_parse_osrm_table_treats_non_numeric_metric_as_unavailable_edge():
+    payload = '{"code":"Ok","distances":[[0,"bad"],[0,0]],"durations":[[0,1],[0,0]]}'
+    matrix = parse_osrm_table(payload, expected_size=2)
+    assert matrix[0][1] is None
 
 
 def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
