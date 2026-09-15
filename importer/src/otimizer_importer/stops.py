@@ -11,9 +11,9 @@ DEFAULT_ADDRESS_TOLERANCE_METERS = 50.0
 def coordinate_key(latitude: float, longitude: float, precision: int = 6) -> tuple[float, float]:
     """Create a deterministic physical-location key.
 
-    Coordinates remain the primary spatial key. Address, Quadra and Lote are
-    additional identity evidence used to reconcile small GPS variations and
-    to prevent contradictory property information from being merged.
+    Coordinates are the spatial index, while address, house number, Quadra and
+    Lote are independent identity evidence. Missing evidence does not block a
+    merge; contradictory known evidence does.
     """
     return round(latitude, precision), round(longitude, precision)
 
@@ -24,8 +24,8 @@ def _normalize_text(value: str | None) -> str | None:
     normalized = unicodedata.normalize("NFKD", value)
     normalized = "".join(char for char in normalized if not unicodedata.combining(char))
     normalized = normalized.casefold()
-    normalized = re.sub(r"[^a-z0-9]+", " ", normalized)
-    normalized = re.sub(r"\s+", " ", normalized).strip()
+    normalized = re.sub(r"[^a-z0-9]+", " ", normalized).strip()
+    normalized = re.sub(r"\s+", " ", normalized)
     return normalized or None
 
 
@@ -33,33 +33,35 @@ def _normalize_address(value: str | None) -> str | None:
     return _normalize_text(value)
 
 
-def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str | None]:
+def _normalize_number(value: str | None) -> str | None:
+    normalized = _normalize_text(value)
+    if normalized is None:
+        return None
+    if normalized.isdigit():
+        return str(int(normalized))
+    return normalized.replace(" ", "")
+
+
+def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str | None, str | None]:
+    """Return independent address identity evidence for one delivery."""
     return (
         delivery.normalized_address or _normalize_address(delivery.address),
+        _normalize_number(delivery.number),
         _normalize_text(delivery.quadra),
         _normalize_text(delivery.lote),
     )
 
 
-def _address_compatible(first: Delivery, second: Delivery) -> bool:
-    """Reject a merge when known address identity contradicts."""
-    first_address = _location_evidence(first)[0]
-    second_address = _location_evidence(second)[0]
-    if first_address is None or second_address is None:
-        return True
-    return first_address == second_address
-
-
 def _property_compatible(first: Delivery, second: Delivery) -> bool:
-    """Reject a merge when known address/property values contradict."""
-    return _address_compatible(first, second) and all(
+    """Reject a merge when any known identity field contradicts."""
+    return all(
         left is None or right is None or left == right
-        for left, right in zip(_location_evidence(first)[1:], _location_evidence(second)[1:])
+        for left, right in zip(_location_evidence(first), _location_evidence(second))
     )
 
 
 def _has_shared_strong_evidence(first: Delivery, second: Delivery) -> bool:
-    """Return whether the pair shares an explicit address/property identity."""
+    """Require at least one explicit shared identity field for GPS-jitter merges."""
     first_evidence = _location_evidence(first)
     second_evidence = _location_evidence(second)
     return any(
@@ -86,12 +88,11 @@ def group_physical_stops(
 ) -> list[PhysicalStop]:
     """Group deliveries into physical stops without using source Stop/Sequence.
 
-    Identical coordinates remain one physical location when their known
-    address/property evidence is compatible. Contradictory known addresses or
-    Quadra/Lote values are kept in separate physical stops so one GPS point
-    cannot erase distinct properties. Distinct coordinates can be reconciled
-    for GPS jitter when explicit evidence agrees and the distance is within
-    tolerance.
+    The decision uses latitude/longitude together with every available identity
+    field: normalized address, house number, Quadra and Lote. Missing fields are
+    neutral. Explicit conflicts remain separate. Distinct coordinates can be
+    reconciled for GPS jitter only when at least one explicit identity field
+    agrees and all known fields remain compatible.
     """
     if address_tolerance_meters < 0:
         raise ValueError("address_tolerance_meters cannot be negative")
@@ -130,9 +131,8 @@ def group_physical_stops(
             )
 
     # Reconcile neighboring GPS points only when explicit location evidence
-    # agrees. Proximity alone never merges two unrelated addresses. Check the
-    # candidate against every delivery already in the stop so reconciliation
-    # cannot create a transitive merge between contradictory properties.
+    # agrees. Proximity alone never merges two unrelated addresses. Check every
+    # member already in the candidate stop to prevent transitive conflicts.
     reconciled: list[PhysicalStop] = []
     for stop in stops:
         representative = stop.deliveries[0]
