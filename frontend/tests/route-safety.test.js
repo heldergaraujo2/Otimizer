@@ -151,7 +151,7 @@ test("desenha apenas segmentos contínuos e nunca envia a parada pendente ao OSR
   assert.equal(geometry.type, "FeatureCollection");
   assert.equal(geometry.features.length, 2);
   assert.equal(h.requests.length, 2);
-  assert.match(h.requests[0], /-16\.7,-49\.2;-16\.71,-49\.21/);
-  assert.match(h.requests[1], /-16\.72,-49\.22;-16\.73,-49\.23/);
+  assert.match(h.requests[0], /-49\.2,-16\.7;-49\.21,-16\.71/);
+  assert.match(h.requests[1], /-49\.22,-16\.72;-49\.23,-16\.73/);
   assert.equal(h.ui.mapCoordinates(pending), null);
 });
