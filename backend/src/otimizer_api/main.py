@@ -306,4 +306,31 @@ def create_app(
     return api
 
 
-app = create_app()
+from otimizer_api.persistence import (
+    SQLitePaymentRepository,
+    build_sqlite_services,
+)
+from otimizer_api.payments import SandboxPixGateway
+
+
+def _database_path() -> Path:
+    configured = os.getenv("OTIMIZER_DB_PATH")
+    if configured and configured.strip():
+        return Path(configured.strip())
+    return Path.home() / ".otimizer" / "otimizer.db"
+
+
+_database, _auth_service, _license_authorizer = build_sqlite_services(_database_path())
+_payment_repository = SQLitePaymentRepository(_database)
+_payment_gateway = SandboxPixGateway(_payment_repository)
+_payment_service = PaymentService(
+    _payment_repository,
+    _payment_gateway,
+    _license_authorizer.repository,
+)
+
+app = create_app(
+    auth_service=_auth_service,
+    license_authorizer=_license_authorizer,
+    payment_service=_payment_service,
+)
