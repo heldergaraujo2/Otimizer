@@ -71,7 +71,7 @@ def _pending_key(delivery: Delivery) -> tuple[object, ...]:
 
 
 def group_physical_stops(deliveries: list[Delivery], *, address_tolerance_meters: float = DEFAULT_ADDRESS_TOLERANCE_METERS) -> list[PhysicalStop]:
-    """Group deliveries while preserving pending-location deliveries as routable route stops."""
+    """Group deliveries while preserving pending-location deliveries as route stops."""
     if address_tolerance_meters < 0:
         raise ValueError("address_tolerance_meters cannot be negative")
 
@@ -83,7 +83,7 @@ def group_physical_stops(deliveries: list[Delivery], *, address_tolerance_meters
         else:
             grouped[coordinate_key(delivery.latitude, delivery.longitude)].append(delivery)
 
-    stops: list[PhysicalStop] = []
+    resolved_stops: list[PhysicalStop] = []
     for latitude, longitude in grouped:
         members = grouped[(latitude, longitude)]
         split_members: list[list[Delivery]] = []
@@ -94,17 +94,16 @@ def group_physical_stops(deliveries: list[Delivery], *, address_tolerance_meters
                 split_members.append(target)
             target.append(member)
         for member_group in split_members:
-            stops.append(PhysicalStop(id=f"stop-{len(stops) + 1:04d}", latitude=latitude, longitude=longitude, deliveries=member_group))
+            resolved_stops.append(PhysicalStop(id=f"stop-{len(resolved_stops) + 1:04d}", latitude=latitude, longitude=longitude, deliveries=member_group))
 
     reconciled: list[PhysicalStop] = []
-    for stop in stops:
+    for stop in resolved_stops:
         representative = stop.deliveries[0]
         matching_stop = next(
             (
                 candidate
                 for candidate in reconciled
-                if not candidate.is_pending_location
-                and _distance_meters(representative, candidate.deliveries[0]) <= address_tolerance_meters
+                if _distance_meters(representative, candidate.deliveries[0]) <= address_tolerance_meters
                 and all(_has_shared_strong_evidence(representative, existing) and _property_compatible(representative, existing) for existing in candidate.deliveries)
                 and all(_property_compatible(delivery, existing) for delivery in stop.deliveries for existing in candidate.deliveries)
             ),
@@ -121,7 +120,9 @@ def group_physical_stops(deliveries: list[Delivery], *, address_tolerance_meters
         if not any(key):
             key = ("row", delivery.row_number)
         pending_groups.setdefault(key, []).append(delivery)
-    for member_group in pending_groups.values():
-        stops.append(PhysicalStop(id=f"stop-{len(stops) + 1:04d}", latitude=None, longitude=None, deliveries=member_group))
 
-    return reconciled + [stop for stop in stops if stop not in reconciled]
+    pending_stops = [
+        PhysicalStop(id=f"stop-{len(reconciled) + index + 1:04d}", latitude=None, longitude=None, deliveries=member_group)
+        for index, member_group in enumerate(pending_groups.values())
+    ]
+    return reconciled + pending_stops
