@@ -99,6 +99,11 @@ def group_physical_stops(
 
     grouped: dict[tuple[float, float], list[Delivery]] = defaultdict(list)
     for delivery in deliveries:
+        # Deliveries without a complete GPS pair are preserved by the import
+        # layer and handled by the geolocation stage before routing. They
+        # cannot form a routable PhysicalStop at this stage.
+        if delivery.latitude is None or delivery.longitude is None:
+            continue
         grouped[coordinate_key(delivery.latitude, delivery.longitude)].append(delivery)
 
     stops: list[PhysicalStop] = []

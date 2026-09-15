@@ -178,6 +178,63 @@ def test_provider_cache_key_keeps_distinct_address_evidence_separate(monkeypatch
     assert calls == ["123", "125"]
 
 
+def test_provider_can_resolve_missing_gps_from_neighborhood_block_and_lot(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    calls = []
+
+    def query_lot_by_parcel(current_evidence):
+        calls.append(
+            (
+                current_evidence.neighborhood,
+                current_evidence.quadra,
+                current_evidence.lote,
+            )
+        )
+        return [
+            {
+                "attributes": {
+                    "id": "LOT-24",
+                    "id_qdr": "BLOCK-30",
+                    "nm_lot": "24",
+                    "nm_imovel": "24",
+                },
+                "geometry": {
+                    "rings": [[
+                        [-49.187253565666218, -16.642102968739227],
+                        [-49.187212226367443, -16.641983155368877],
+                        [-49.186924132680332, -16.642068276612445],
+                        [-49.186899019186718, -16.642148624393904],
+                        [-49.186925681013882, -16.642216999202457],
+                        [-49.187253565666218, -16.642102968739227],
+                    ]]
+                },
+            }
+        ]
+
+    monkeypatch.setattr(provider, "_query_lot_by_parcel", query_lot_by_parcel)
+    monkeypatch.setattr(provider, "_query_street_segments", lambda latitude, longitude: [])
+
+    missing_gps = LocationEvidence(
+        latitude=None,
+        longitude=None,
+        address="Rua SR 2 qd 30 lt 24, Sn, qd 30 lt 24 sobrado da esquina",
+        normalized_address="rua sr 2 qd 30 lt 24 sn qd 30 lt 24 sobrado da esquina",
+        number=None,
+        quadra="30",
+        lote="24",
+        zipcode="74000-000",
+        neighborhood="Recanto das Minas Gerais",
+        city="goiania",
+    )
+
+    resolved = provider.resolve(missing_gps)
+
+    assert resolved is not None
+    assert resolved.cadastral_id == "LOT-24"
+    assert resolved.source == "goiania-cadastral-lot"
+    assert calls == [("Recanto das Minas Gerais", "30", "24")]
+
+
 def test_provider_keeps_missing_gps_unresolved_instead_of_querying_point(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     calls = {"official": 0, "lots": 0}

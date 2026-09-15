@@ -1,4 +1,4 @@
-"""Goiânia cadastral location provider."""
+"""GoiÃ¢nia cadastral location provider."""
 
 from __future__ import annotations
 
@@ -14,12 +14,14 @@ DEFAULT_FEATURE_BASE_URL = (
     "MapaServer/Feature_Base/FeatureServer"
 )
 LOT_LAYER_ID = 0
+BLOCK_LAYER_ID = 1
+NEIGHBORHOOD_LAYER_ID = 2
 OFFICIAL_NUMBER_LAYER_ID = 5
 STREET_SEGMENT_LAYER_ID = 7
 
 
 class GoianiaLocationProvider(LocationDataProvider):
-    """Resolve delivery evidence using Goiânia cadastral data.
+    """Resolve delivery evidence using GoiÃ¢nia cadastral data.
 
     A municipal official property number is preferred when present. The
     resolved property point is then projected onto the nearest municipal
@@ -45,6 +47,35 @@ class GoianiaLocationProvider(LocationDataProvider):
         return resolved
 
     def _resolve_uncached(self, evidence: LocationEvidence) -> ResolvedLocation | None:
+        if evidence.latitude is None or evidence.longitude is None:
+            features = self._query_lot_by_parcel(evidence)
+            if not features:
+                return None
+
+            best = features[0]
+            property_point = _representative_point(best.get("geometry") or {})
+            if property_point is None:
+                return None
+
+            attributes = best.get("attributes") or {}
+            cadastral_id = attributes.get("id")
+            access_point = self._nearest_street_access(property_point)
+            if access_point is not None:
+                return _resolved_with_access(
+                    property_point,
+                    access_point,
+                    confidence=0.88,
+                    source="goiania-cadastral-lot-road-access",
+                    cadastral_id=cadastral_id,
+                )
+            return _resolved_with_access(
+                property_point,
+                None,
+                confidence=0.80,
+                source="goiania-cadastral-lot",
+                cadastral_id=cadastral_id,
+            )
+
         if evidence.number:
             official_numbers = self._query_official_numbers(evidence)
             best_number = _best_matching_official_number(evidence, official_numbers)
@@ -105,6 +136,85 @@ class GoianiaLocationProvider(LocationDataProvider):
             "id,id_qdr,nm_lot,nm_imovel,id_seg",
         )
 
+    def _query_lot_by_parcel(self, evidence: LocationEvidence) -> list[dict]:
+        """Find cadastral lots from neighborhood + block + lot evidence."""
+        if not evidence.neighborhood or not evidence.quadra or not evidence.lote:
+            return []
+
+        neighborhood_features = self._query_layer_where(
+            NEIGHBORHOOD_LAYER_ID,
+            f"nm_bai LIKE '%{_escape_where_value(evidence.neighborhood)}%'",
+            "id,nm_bai",
+        )
+        if not neighborhood_features:
+            neighborhood_name = re.sub(
+                r"^(setor|s)\s+",
+                "",
+                evidence.neighborhood.strip(),
+                flags=re.IGNORECASE,
+            )
+            if neighborhood_name != evidence.neighborhood.strip():
+                neighborhood_features = self._query_layer_where(
+                    NEIGHBORHOOD_LAYER_ID,
+                    f"nm_bai LIKE '%{_escape_where_value(neighborhood_name)}%'",
+                    "id,nm_bai",
+                )
+
+        if not neighborhood_features:
+            return []
+
+        neighborhood_id = (neighborhood_features[0].get("attributes") or {}).get("id")
+        if not neighborhood_id:
+            return []
+
+        block_features = self._query_layer_where(
+            BLOCK_LAYER_ID,
+            (
+                f"id_bai = '{_escape_where_value(neighborhood_id)}' "
+                f"AND nm_qdr LIKE '%{_escape_where_value(evidence.quadra)}%'"
+            ),
+            "id,nm_qdr,id_bai",
+        )
+        if not block_features:
+            return []
+
+        block_id = (block_features[0].get("attributes") or {}).get("id")
+        if not block_id:
+            return []
+
+        return self._query_layer_where(
+            LOT_LAYER_ID,
+            (
+                f"id_qdr = '{_escape_where_value(block_id)}' "
+                f"AND nm_lot = '{_escape_where_value(evidence.lote)}'"
+            ),
+            "id,id_qdr,nm_lot,nm_imovel,id_seg",
+        )
+
+    def _query_layer_where(
+        self,
+        layer_id: int,
+        where: str,
+        out_fields: str,
+    ) -> list[dict]:
+        params = {
+            "where": where,
+            "outFields": out_fields,
+            "returnGeometry": "true",
+            "outSR": "4326",
+            "resultRecordCount": "25",
+            "f": "json",
+        }
+        url = f"{self.base_url}/{layer_id}/query?{urlencode(params)}"
+        request = Request(url, headers={"User-Agent": "Otimizer/0.1"})
+        try:
+            with urlopen(request, timeout=self.timeout_seconds) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except (OSError, ValueError, json.JSONDecodeError):
+            return []
+        return payload.get("features") or []
+
+
     def _query_official_numbers(self, evidence: LocationEvidence) -> list[dict]:
         return self._query_layer_at_point(
             evidence.latitude,
@@ -159,6 +269,11 @@ class GoianiaLocationProvider(LocationDataProvider):
         except (OSError, ValueError, json.JSONDecodeError):
             return []
         return payload.get("features") or []
+
+
+def _escape_where_value(value: object) -> str:
+    return str(value).replace("'", "''")
+
 
 
 def _resolution_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:

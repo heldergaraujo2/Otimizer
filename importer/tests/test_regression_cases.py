@@ -68,14 +68,15 @@ def test_real_world_case_missing_sequence_and_dash_values_keeps_every_valid_deli
     stops = group_physical_stops(list(result.deliveries))
 
     assert result.data_rows_seen == 4
-    assert result.eligible_delivery_count == 3
-    assert result.unresolved_rows == (5,)
+    assert result.eligible_delivery_count == 4
+    assert result.unresolved_rows == ()
     assert len(stops) == 2
     assert sum(stop.delivery_count for stop in stops) == 3
     assert {delivery.tracking_number for delivery in result.deliveries} == {
         "TN-001",
         "TN-002",
         "TN-003",
+        "TN-004",
     }
 
 
@@ -116,3 +117,31 @@ def test_multiple_deliveries_at_one_location_are_one_routed_physical_stop(tmp_pa
     assert len(stops) == 1
     assert stops[0].delivery_count == 4
     assert len({delivery.tracking_number for delivery in stops[0].deliveries}) == 4
+
+def test_missing_gps_preserves_delivery_for_later_geolocation(tmp_path: Path):
+    path = tmp_path / "case_missing_gps_preserved.xlsx"
+    write_xlsx(
+        path,
+        [
+            row(
+                1,
+                1,
+                1,
+                "TN-PENDING",
+                None,
+                None,
+                "Rua SR 2 qd 30 lt 24, Sn, qd 30 lt 24 sobrado da esquina",
+            ),
+        ],
+    )
+
+    result = import_result(path)
+
+    assert result.data_rows_seen == 1
+    assert result.eligible_delivery_count == 1
+    assert result.unresolved_rows == ()
+    assert result.deliveries[0].tracking_number == "TN-PENDING"
+    assert result.deliveries[0].latitude is None
+    assert result.deliveries[0].longitude is None
+    assert result.deliveries[0].quadra == "30"
+    assert result.deliveries[0].lote == "24"

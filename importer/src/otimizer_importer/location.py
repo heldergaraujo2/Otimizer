@@ -8,8 +8,8 @@ from .models import Delivery
 class LocationEvidence:
     """All source evidence available for resolving one delivery location."""
 
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
     address: str | None
     normalized_address: str | None
     number: str | None
@@ -65,6 +65,8 @@ class LocationDataProvider(Protocol):
 
 def gps_fallback(evidence: LocationEvidence) -> ResolvedLocation:
     """Return the original spreadsheet coordinate as the safe final fallback."""
+    if evidence.latitude is None or evidence.longitude is None:
+        raise ValueError("Cannot use GPS fallback without valid coordinates")
     return ResolvedLocation(
         latitude=evidence.latitude,
         longitude=evidence.longitude,

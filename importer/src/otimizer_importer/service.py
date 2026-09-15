@@ -138,6 +138,51 @@ def _resolve_physical_stops(
     return resolved
 
 
+def _resolve_missing_coordinates(
+    deliveries: list[Delivery],
+    provider: LocationDataProvider | None,
+) -> tuple[list[Delivery], tuple[int, ...]]:
+    """Resolve deliveries that have no complete GPS pair before stop grouping."""
+    if provider is None:
+        return (
+            [
+                delivery
+                for delivery in deliveries
+                if delivery.latitude is not None and delivery.longitude is not None
+            ],
+            tuple(
+                delivery.row_number
+                for delivery in deliveries
+                if delivery.latitude is None or delivery.longitude is None
+            ),
+        )
+
+    resolved_deliveries: list[Delivery] = []
+    unresolved_rows: list[int] = []
+
+    for delivery in deliveries:
+        if delivery.latitude is not None and delivery.longitude is not None:
+            resolved_deliveries.append(delivery)
+            continue
+
+        evidence = LocationEvidence.from_delivery(delivery)
+        location = provider.resolve(evidence)
+
+        if location is None:
+            unresolved_rows.append(delivery.row_number)
+            continue
+
+        resolved_deliveries.append(
+            replace(
+                delivery,
+                latitude=location.latitude,
+                longitude=location.longitude,
+            )
+        )
+
+    return resolved_deliveries, tuple(unresolved_rows)
+
+
 def optimize_deliveries_file(
     path: str,
     *,
@@ -151,10 +196,15 @@ def optimize_deliveries_file(
 ) -> OptimizationServiceResult:
     """Run the complete XLSX-to-route application workflow."""
     imported = import_result(path)
-    if imported.eligible_delivery_count == 0:
-        raise ValueError("Workbook contains no deliveries with valid latitude and longitude")
 
-    physical_stops = group_physical_stops(list(imported.deliveries))
+    deliveries, missing_location_rows = _resolve_missing_coordinates(
+        list(imported.deliveries),
+        location_provider,
+    )
+    if not deliveries:
+        raise ValueError("Workbook contains no deliveries with resolvable location")
+
+    physical_stops = group_physical_stops(deliveries)
     physical_stops = _resolve_physical_stops(physical_stops, location_provider)
     physical_stops_tuple = tuple(physical_stops)
     full_matrix = build_route_matrix(
@@ -173,7 +223,7 @@ def optimize_deliveries_file(
         objective=objective,
     )
     result = optimize(problem)
-    _validate_route_coverage(imported.deliveries, physical_stops_tuple, result.route)
+    _validate_route_coverage(tuple(deliveries), physical_stops_tuple, result.route)
     route_metrics = calculate_route_metrics(
         result.route,
         physical_stops,
@@ -184,9 +234,12 @@ def optimize_deliveries_file(
         destination_id=result.destination.id if result.destination is not None else None,
         destination_metric=result.destination_metric,
     )
+    unresolved_rows = tuple(
+        sorted(set(imported.unresolved_rows) | set(missing_location_rows))
+    )
     service_result = OptimizationServiceResult(
-        eligible_delivery_count=imported.eligible_delivery_count,
-        unresolved_rows=imported.unresolved_rows,
+        eligible_delivery_count=len(deliveries),
+        unresolved_rows=unresolved_rows,
         physical_stops=physical_stops_tuple,
         optimization=result,
         route_metrics=route_metrics,

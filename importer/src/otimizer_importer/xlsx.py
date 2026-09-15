@@ -34,6 +34,8 @@ def _coordinate(value: Any) -> float | None:
         return None
     if not -90 <= number <= 90:
         return None
+    if number == 0:
+        return None
     return number
 
 
@@ -45,6 +47,8 @@ def _longitude(value: Any) -> float | None:
     except (TypeError, ValueError):
         return None
     if not -180 <= number <= 180:
+        return None
+    if number == 0:
         return None
     return number
 
@@ -82,7 +86,7 @@ def import_result(path: str | Path) -> ImportResult:
         columns = {_text(value): index for index, value in enumerate(header) if _text(value)}
         missing = REQUIRED_COLUMNS - columns.keys()
         if missing:
-            raise ValueError(f"Colunas obrigatórias ausentes: {sorted(missing)}")
+            raise ValueError(f"Colunas obrigatÃ³rias ausentes: {sorted(missing)}")
 
         quadra_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["quadra"])
         lote_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["lote"])
@@ -101,9 +105,6 @@ def import_result(path: str | Path) -> ImportResult:
             data_rows_seen += 1
             latitude = _coordinate(get(row, "Latitude"))
             longitude = _longitude(get(row, "Longitude"))
-            if latitude is None or longitude is None:
-                unresolved.append(row_number)
-                continue
 
             address = _text(get(row, "Destination Address"))
             parsed = parse_address(address)

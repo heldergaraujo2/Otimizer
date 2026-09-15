@@ -14,8 +14,8 @@ class Delivery:
     neighborhood: str | None
     city: str | None
     zipcode: str | None
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
     quadra: str | None = None
     lote: str | None = None
     number: str | None = None
