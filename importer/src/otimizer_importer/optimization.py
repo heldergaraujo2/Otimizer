@@ -418,20 +418,20 @@ def _heuristic_starts(problem: OptimizationProblem) -> tuple[int, ...]:
     selected = ranked[:limit]
     if len(reachable) > limit:
         step = max(1, len(ranked) // limit)
-        for index in ranked[::step]:
-            if index not in selected:
-                selected.append(index)
-            if len(selected) >= limit:
-                break
+        selected = sorted(set(selected + ranked[::step]))[:limit]
     return tuple(selected)
 
 
-def _optimize_order(problem: OptimizationProblem):
+def _optimize_order(problem: OptimizationProblem) -> tuple[int, ...]:
     size = len(problem.stops)
     if size == 0:
         return ()
-    if size <= 12:
-        starts = _heuristic_starts(problem) if problem.origin_metrics is not None else (problem.start_index,)
+
+    starts = _heuristic_starts(problem)
+    if not starts:
+        raise OptimizationError("No reachable physical stop from the declared origin")
+
+    if size <= 10:
         return _exact_order(
             problem.stops,
             problem.matrix,
@@ -495,7 +495,7 @@ def optimize(problem: OptimizationProblem) -> OptimizationResult:
     return OptimizationResult(
         route=route,
         objective=problem.objective,
-        start_index=problem.start_index if ordered_stops else None,
+        start_index=None if problem.origin is not None else (problem.start_index if ordered_stops else None),
         return_to_start=problem.return_to_start,
         origin=problem.origin,
         destination=problem.destination,
