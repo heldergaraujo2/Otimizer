@@ -236,10 +236,8 @@ def _best_effort_order(problem):
     if size == 0:
         return ()
     starts = _heuristic_starts(problem) or (problem.start_index,)
-    # The missing-leg objective is exact through 14 stops. This keeps the
-    # primary objective (minimum unavailable legs) deterministic before the
-    # large-route heuristic is used, without making the normal large-route
-    # path factorial.
+    # Keep the missing-leg objective exact through 14 stops, then use the
+    # scalable heuristic for larger routes.
     if size <= 14:
         best = None
         for start in starts:
