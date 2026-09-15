@@ -18,3 +18,12 @@
   border: 3px solid #fff;
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
 }
+
+.otimizer-stop-marker span.visited,
+.stop.visited .stop-number {
+  background: #808080;
+}
+
+.stop.visited {
+  opacity: 0.72;
+}
