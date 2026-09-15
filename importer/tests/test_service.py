@@ -76,10 +76,13 @@ def test_service_reports_unresolved_rows_without_dropping_them(tmp_path):
 
     result = optimize_deliveries_file(str(path), routing_provider=FakeRoutingProvider())
 
-    assert result.eligible_delivery_count == 3
+    assert result.eligible_delivery_count == 4
     assert result.pending_count == 1
     assert result.unresolved_rows == (5,)
-    assert result.route.delivery_count == 3
+    assert result.route.delivery_count == 4
+    assert result.routed_delivery_count == 4
+    assert result.coverage_complete is True
+    assert result.routing_complete is False
 
 
 def test_service_route_contains_each_valid_delivery_row_exactly_once(tmp_path):
