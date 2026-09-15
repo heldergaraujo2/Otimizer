@@ -156,15 +156,23 @@ def parse_osrm_table(payload: str | bytes, expected_size: int, expected_columns:
             raise RoutingError("Routing matrix row size does not match requested locations")
         values: list[TravelMetric | None] = []
         for distance, duration in zip(distance_row, duration_row):
+            # OSRM uses null for unavailable paths, and some upstream/proxy
+            # combinations may expose non-finite JSON numbers. Either means
+            # that this directed edge is unavailable; it must not invalidate
+            # the whole workbook or fabricate a road metric.
             if distance is None or duration is None:
                 values.append(None)
                 continue
             if not isinstance(distance, (int, float)) or not isinstance(duration, (int, float)):
-                raise RoutingError("Routing matrix contains a non-numeric metric")
-            try:
-                values.append(TravelMetric(float(distance), float(duration)))
-            except ValueError as exc:
-                raise RoutingError("Routing matrix contains an invalid metric") from exc
+                values.append(None)
+                continue
+            if not math.isfinite(float(distance)) or not math.isfinite(float(duration)):
+                values.append(None)
+                continue
+            if float(distance) < 0 or float(duration) < 0:
+                values.append(None)
+                continue
+            values.append(TravelMetric(float(distance), float(duration)))
         matrix.append(tuple(values))
     return tuple(matrix)
 
