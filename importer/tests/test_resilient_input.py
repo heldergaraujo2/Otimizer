@@ -60,7 +60,7 @@ def test_zero_zero_gps_is_preserved_as_missing_location(tmp_path: Path):
     assert result.deliveries[0].lote == "24"
 
 
-def test_all_pending_deliveries_return_an_auditable_empty_route(tmp_path: Path):
+def test_all_pending_deliveries_remain_auditable_in_the_route(tmp_path: Path):
     path = tmp_path / "all-pending.xlsx"
     write_xlsx(
         path,
@@ -72,12 +72,18 @@ def test_all_pending_deliveries_return_an_auditable_empty_route(tmp_path: Path):
 
     result = optimize_deliveries_file(str(path))
 
-    assert result.routed_delivery_count == 0
-    assert result.physical_stop_count == 0
+    assert result.eligible_delivery_count == 2
+    assert result.routed_delivery_count == 2
+    assert result.physical_stop_count == 2
+    assert result.routed_stop_count == 2
     assert result.pending_count == 2
     assert result.unresolved_rows == (2, 3)
+    assert result.routing_complete is False
+    assert result.coverage_complete is True
     assert result.route_metrics.distance_meters == 0
     assert result.route_metrics.duration_seconds == 0
+    assert len(result.route_metrics.legs) == 1
+    assert result.route_metrics.legs[0].routable is False
 
 
 def test_nan_metric_becomes_unavailable_edge_instead_of_fatal_error():
