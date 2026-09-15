@@ -491,7 +491,7 @@ def optimize(problem: OptimizationProblem) -> OptimizationResult:
     if problem.destination_metrics is not None:
         destination_metric = problem.destination_metrics[order[-1]]
 
-    route = Route(stops=ordered_stops)
+    route = Route.from_physical_stops(list(ordered_stops))
     return OptimizationResult(
         route=route,
         objective=problem.objective,
