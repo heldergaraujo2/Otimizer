@@ -8,6 +8,7 @@ const source = fs.readFileSync(path.join(__dirname, "..", "route-safety.js"), "u
 
 function createHarness() {
   const elements = new Map();
+  const requests = [];
   const document = {
     querySelectorAll: () => [],
     querySelector: () => null,
@@ -16,7 +17,10 @@ function createHarness() {
     console,
     window: {},
     document,
-    fetch: async () => ({ ok: true, json: async () => ({ routes: [{ geometry: {} }] }) }),
+    fetch: async (url) => {
+      requests.push(url);
+      return { ok: true, json: async () => ({ routes: [{ geometry: {} }] }) };
+    },
     escapeHtml: (value) => String(value ?? ""),
     $: (id) => {
       if (!elements.has(id)) {
@@ -50,6 +54,7 @@ function createHarness() {
     ${source}
     globalThis.__state = {
       elements,
+      requests,
       get currentRoute() { return currentRoute; },
       set currentRoute(value) { currentRoute = value; },
       get renderStops() { return renderStops; },
@@ -58,7 +63,7 @@ function createHarness() {
       get ui() { return window.OtimizerRouteUI; },
     };
   `;
-  const vmContext = vm.createContext({ ...context, elements });
+  const vmContext = vm.createContext({ ...context, elements, requests });
   vm.runInContext(bootstrap, vmContext);
   return vm.runInContext("globalThis.__state", vmContext);
 }
@@ -133,13 +138,20 @@ test("não gera link de navegação para parada pendente no detalhe", () => {
   assert.doesNotMatch(h.elements.get("detail-content").innerHTML, /google\.com\/maps\/dir/);
 });
 
-test("não tenta roteamento OSRM incluindo parada sem coordenadas", async () => {
+test("desenha apenas segmentos contínuos e nunca envia a parada pendente ao OSRM", async () => {
   const h = createHarness();
-  const located = { sequence: 1, latitude: -16.70, longitude: -49.20, deliveries: [], location: {} };
-  const located2 = { sequence: 3, latitude: -16.71, longitude: -49.21, deliveries: [], location: {} };
-  const pending = { sequence: 2, latitude: null, longitude: null, deliveries: [], location: {} };
-  const geometry = await h.fetchRouteGeometry([located, pending, located2]);
-  assert.ok(geometry);
-  assert.equal(h.ui.mapCoordinates(located).latitude, -16.70);
+  const first = { sequence: 1, latitude: -16.70, longitude: -49.20, deliveries: [], location: {} };
+  const second = { sequence: 2, latitude: -16.71, longitude: -49.21, deliveries: [], location: {} };
+  const pending = { sequence: 3, latitude: null, longitude: null, deliveries: [], location: {} };
+  const fourth = { sequence: 4, latitude: -16.72, longitude: -49.22, deliveries: [], location: {} };
+  const fifth = { sequence: 5, latitude: -16.73, longitude: -49.23, deliveries: [], location: {} };
+
+  const geometry = await h.fetchRouteGeometry([first, second, pending, fourth, fifth]);
+
+  assert.equal(geometry.type, "FeatureCollection");
+  assert.equal(geometry.features.length, 2);
+  assert.equal(h.requests.length, 2);
+  assert.match(h.requests[0], /-16\.7,-49\.2;-16\.71,-49\.21/);
+  assert.match(h.requests[1], /-16\.72,-49\.22;-16\.73,-49\.23/);
   assert.equal(h.ui.mapCoordinates(pending), null);
 });
