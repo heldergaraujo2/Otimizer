@@ -324,7 +324,7 @@ def _database_path() -> Path:
 
 _database, _auth_service, _license_authorizer = build_sqlite_services(_database_path())
 _payment_repository = SQLitePaymentRepository(_database)
-_payment_gateway = SandboxPixGateway(_database)
+_payment_gateway = SandboxPixGateway(_payment_repository)
 _payment_service = PaymentService(
     _payment_repository,
     _payment_gateway,
