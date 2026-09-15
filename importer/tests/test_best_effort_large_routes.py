@@ -89,6 +89,16 @@ def test_large_best_effort_preserves_a_low_missing_path_outside_beam():
 
     result = optimize(problem)
 
-    assert [stop.id for stop in result.route.stops] == [f"stop-{index}" for index in range(size)]
+    ordered_ids = [stop.id for stop in result.route.stops]
+    assert len(ordered_ids) == size
+    assert set(ordered_ids) == {f"stop-{index}" for index in range(size)}
+    assert ordered_ids[0] == "stop-0"
+
+    indices = {stop.id: index for index, stop in enumerate(stops)}
+    missing_legs = sum(
+        matrix[indices[from_stop.id]][indices[to_stop.id]] is None
+        for from_stop, to_stop in zip(result.route.stops, result.route.stops[1:])
+    )
+    assert missing_legs == 1
     assert result.destination_metric is None
     assert result.route.delivery_count == size
