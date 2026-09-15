@@ -10,6 +10,7 @@ def delivery(
     address: str | None = None,
     quadra: str | None = None,
     lote: str | None = None,
+    number: str | None = None,
 ) -> Delivery:
     return Delivery(
         row_number=row,
@@ -25,6 +26,7 @@ def delivery(
         longitude=lon,
         quadra=quadra,
         lote=lote,
+        number=number,
     )
 
 
@@ -107,6 +109,30 @@ def test_different_addresses_at_same_coordinate_stay_separate():
 
     assert len(stops) == 2
     assert sum(stop.delivery_count for stop in stops) == 2
+
+
+def test_different_house_numbers_at_same_coordinate_stay_separate():
+    deliveries = [
+        delivery(2, -16.6869, -49.2648, "1", "Rua das Flores", number="100"),
+        delivery(3, -16.6869, -49.2648, "2", "Rua das Flores", number="102"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 2
+    assert sorted(d.number for stop in stops for d in stop.deliveries) == ["100", "102"]
+
+
+def test_same_house_number_with_gps_jitter_groups_when_other_evidence_is_missing():
+    deliveries = [
+        delivery(2, -16.686900, -49.264800, "1", None, None, None, "100"),
+        delivery(3, -16.686940, -49.264820, "2", None, None, None, "100"),
+    ]
+
+    stops = group_physical_stops(deliveries)
+
+    assert len(stops) == 1
+    assert stops[0].delivery_count == 2
 
 
 def test_different_lotes_at_same_coordinate_stay_separate():
