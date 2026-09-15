@@ -176,3 +176,37 @@ def test_provider_cache_key_keeps_distinct_address_evidence_separate(monkeypatch
     assert provider.resolve(evidence(number="125")) is None
     assert provider.resolve(evidence(number="123")) is None
     assert calls == ["123", "125"]
+
+
+def test_provider_keeps_missing_gps_unresolved_instead_of_querying_point(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    calls = {"official": 0, "lots": 0}
+
+    def query_official_numbers(current_evidence):
+        calls["official"] += 1
+        return []
+
+    def query_lots(current_evidence):
+        calls["lots"] += 1
+        return []
+
+    monkeypatch.setattr(provider, "_query_official_numbers", query_official_numbers)
+    monkeypatch.setattr(provider, "_query_lots", query_lots)
+
+    missing_gps = LocationEvidence(
+        latitude=None,
+        longitude=None,
+        address="Rua SR 2 qd 30 lt 24, Sn, qd 30 lt 24 sobrado da esquina",
+        normalized_address="rua sr 2 qd 30 lt 24 sn qd 30 lt 24 sobrado da esquina",
+        number=None,
+        quadra="30",
+        lote="24",
+        zipcode="74000-000",
+        neighborhood="Recanto das Minas Gerais",
+        city="Goiânia",
+    )
+
+    resolved = provider.resolve(missing_gps)
+
+    assert resolved is None
+    assert calls == {"official": 0, "lots": 0}
