@@ -27,3 +27,35 @@
 .stop.visited {
   opacity: 0.72;
 }
+
+.stop-pending {
+  background: #fff8ed;
+}
+
+.stop-approximate {
+  background: #f8f8f8;
+}
+
+.location-state {
+  font-size: 12px !important;
+  font-weight: 700;
+}
+
+.location-state-pending {
+  color: #9a5b00 !important;
+}
+
+.location-state-approximate {
+  color: #6b5d00 !important;
+}
+
+.location-state-located {
+  color: #2f6f3e !important;
+}
+
+.navigation-disabled {
+  width: 100%;
+  border: 0;
+  cursor: not-allowed;
+  opacity: 0.65;
+}
