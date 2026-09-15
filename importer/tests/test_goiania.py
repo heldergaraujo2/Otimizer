@@ -231,7 +231,7 @@ def test_provider_can_resolve_missing_gps_from_neighborhood_block_and_lot(monkey
 
     assert resolved is not None
     assert resolved.cadastral_id == "LOT-24"
-    assert resolved.source == "goiania-cadastral-lot"
+    assert resolved.source == "goiania-cadastral-parcel"
     assert calls == [("Recanto das Minas Gerais", "30", "24")]
 
 
