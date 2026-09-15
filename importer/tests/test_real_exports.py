@@ -34,6 +34,9 @@ def test_real_xlsx_exports_preserve_delivery_accounting(path: Path, delivery_cou
     Physical-stop counts are data-dependent and must not be treated as product
     constants. The invariant is that every eligible delivery appears exactly
     once in one non-empty physical stop.
+
+    The fixtures intentionally retain their original filenames so future
+    regressions can be compared against the same operational exports.
     """
     assert path.exists(), f"Regression XLSX fixture not found: {path}"
 
