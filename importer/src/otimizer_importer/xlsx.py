@@ -7,11 +7,6 @@ from .address_parser import parse_address
 from .models import Delivery, ImportResult
 
 
-REQUIRED_COLUMNS = {
-    "Latitude",
-    "Longitude",
-}
-
 OPTIONAL_COLUMN_ALIASES = {
     "quadra": ("Quadra", "QUADRA", "quadra"),
     "lote": ("Lote", "LOTE", "lote"),
@@ -32,9 +27,7 @@ def _coordinate(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if not -90 <= number <= 90:
-        return None
-    if number == 0:
+    if not -90 <= number <= 90 or number == 0:
         return None
     return number
 
@@ -46,9 +39,7 @@ def _longitude(value: Any) -> float | None:
         number = float(value)
     except (TypeError, ValueError):
         return None
-    if not -180 <= number <= 180:
-        return None
-    if number == 0:
+    if not -180 <= number <= 180 or number == 0:
         return None
     return number
 
@@ -61,18 +52,12 @@ def _find_optional_column(columns: dict[str | None, int], aliases: tuple[str, ..
 
 
 def import_result(path: str | Path) -> ImportResult:
-    """Import an XLSX and return an auditable accounting of every data row.
+    """Import an XLSX without requiring GPS columns.
 
-    ``read_only=True`` is intentionally avoided here. Some real-world XLSX
-    exports contain an incorrect worksheet dimension (for example, a range
-    that reports only the first column). In that situation openpyxl's
-    read-only iterator can hide valid cells such as Latitude and Longitude.
-    The uploaded delivery exports demonstrated this exact failure mode.
-
-    Address information is enriched conservatively from Destination Address.
-    Quadra/Lote are optional columns, but the parser also extracts them when
-    they are embedded in the free-form address. Original address text remains
-    untouched for later geocoding and cadastral resolution.
+    Latitude/Longitude are valuable evidence, but they are not mandatory for
+    a delivery to enter the pipeline. Missing, zero, malformed or out-of-range
+    coordinates become ``None`` so later location providers can use address,
+    number, quadra, lote, CEP, neighborhood and city evidence.
     """
     workbook = load_workbook(filename=path, read_only=False, data_only=True)
     try:
@@ -84,10 +69,6 @@ def import_result(path: str | Path) -> ImportResult:
             return ImportResult((), (), 0)
 
         columns = {_text(value): index for index, value in enumerate(header) if _text(value)}
-        missing = REQUIRED_COLUMNS - columns.keys()
-        if missing:
-            raise ValueError(f"Colunas obrigatÃ³rias ausentes: {sorted(missing)}")
-
         quadra_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["quadra"])
         lote_column = _find_optional_column(columns, OPTIONAL_COLUMN_ALIASES["lote"])
 
