@@ -91,19 +91,34 @@
     };
 
     fetchRouteGeometry = async function (route) {
-      const located = route.filter((stop) => mapCoordinates(stop));
-      if (located.length < 2) return null;
-      const coordinates = located.map((stop) => {
-        const point = mapCoordinates(stop);
-        return `${point.longitude},${point.latitude}`;
-      }).join(";");
-      const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false`;
-      const response = await fetch(url, { headers: { Accept: "application/json" } });
-      if (!response.ok) throw Error(`OSRM retornou HTTP ${response.status}`);
-      const result = await response.json();
-      const geometry = result.routes?.[0]?.geometry;
-      if (!geometry) throw Error("OSRM não retornou a geometria da rota.");
-      return geometry;
+      const runs = [];
+      let currentRun = [];
+      for (const stop of route) {
+        if (mapCoordinates(stop)) {
+          currentRun.push(stop);
+        } else {
+          if (currentRun.length >= 2) runs.push(currentRun);
+          currentRun = [];
+        }
+      }
+      if (currentRun.length >= 2) runs.push(currentRun);
+      if (!runs.length) return null;
+
+      const features = [];
+      for (const run of runs) {
+        const coordinates = run.map((stop) => {
+          const point = mapCoordinates(stop);
+          return `${point.longitude},${point.latitude}`;
+        }).join(";");
+        const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false`;
+        const response = await fetch(url, { headers: { Accept: "application/json" } });
+        if (!response.ok) throw Error(`OSRM retornou HTTP ${response.status}`);
+        const result = await response.json();
+        const geometry = result.routes?.[0]?.geometry;
+        if (!geometry) throw Error("OSRM não retornou a geometria da rota.");
+        features.push({ type: "Feature", properties: {}, geometry });
+      }
+      return { type: "FeatureCollection", features };
     };
 
     renderMap = async function (route) {
