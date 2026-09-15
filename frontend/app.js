@@ -2,6 +2,7 @@ const API_BASE = window.OTIMIZER_API_BASE || "http://localhost:8000";
 const $ = (id) => document.getElementById(id);
 let map;
 let markers = [];
+let routeLine;
 let currentRoute = [];
 let selectedIndex = -1;
 let accessToken = sessionStorage.getItem("otimizer_access_token") || "";
@@ -80,11 +81,27 @@ function locationSummary(stop) {
   return `Localização resolvida${percentage}`;
 }
 
-function renderMap(route) {
+async function fetchRouteGeometry(route) {
+  if (route.length < 2) return null;
+  const coordinates = route.map(stop => `${stop.longitude},${stop.latitude}`).join(";");
+  const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false`;
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
+  if (!response.ok) throw Error(`OSRM retornou HTTP ${response.status}`);
+  const result = await response.json();
+  const geometry = result.routes?.[0]?.geometry;
+  if (!geometry) throw Error("OSRM não retornou a geometria da rota.");
+  return geometry;
+}
+
+async function renderMap(route) {
   if (!route.length || typeof L === "undefined") return;
   if (!map) map = L.map("map");
   markers.forEach(marker => marker.remove());
   markers = [];
+  if (routeLine) {
+    routeLine.remove();
+    routeLine = null;
+  }
   if (!map._otimizerTiles) {
     L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors" }).addTo(map);
     map._otimizerTiles = true;
@@ -101,7 +118,25 @@ function renderMap(route) {
     marker.on("click", () => showStop(index));
     markers.push(marker);
   });
-  map.fitBounds(L.latLngBounds(route.map(stop => [stop.latitude, stop.longitude])), { padding: [24, 24] });
+
+  try {
+    const geometry = await fetchRouteGeometry(route);
+    routeLine = L.geoJSON(geometry, {
+      style: {
+        weight: 6,
+        opacity: 0.8,
+        color: "#2563eb"
+      }
+    }).addTo(map);
+  } catch (error) {
+    console.warn("Não foi possível desenhar a geometria viária da rota:", error);
+  }
+
+  const layers = routeLine ? [routeLine, ...markers] : markers;
+  if (layers.length) {
+    const bounds = L.featureGroup(layers).getBounds();
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24] });
+  }
 }
 
 function showStop(index) {
@@ -307,7 +342,7 @@ $("optimize").addEventListener("click", async () => {
       : `⚠ Rota incompleta · ${result.summary.routed_deliveries} entrega(s) · ${result.summary.routed_stops} parada(s)`;
     $("coverage").classList.toggle("pending", !result.summary.coverage_complete || result.summary.pending > 0);
     renderStops(currentRoute);
-    renderMap(currentRoute);
+    await renderMap(currentRoute);
     $("stop-detail").hidden = true;
     selectedIndex = -1;
     setStatus("Rota pronta", "success");
