@@ -108,6 +108,46 @@ def test_provider_uses_street_segment_as_vehicle_access_candidate(monkeypatch):
     assert calls == [(2.0, 5.0)]
 
 
+def test_provider_prefers_street_segment_with_matching_cd_log_for_vehicle_access(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    monkeypatch.setattr(
+        provider,
+        "_query_official_numbers",
+        lambda evidence: [
+            {
+                "attributes": {
+                    "id": "NPO-123",
+                    "nm_npo": "123",
+                    "cd_log": "LOG-CORRETO",
+                },
+                "geometry": {"x": 5.0, "y": 2.0},
+            }
+        ],
+    )
+    monkeypatch.setattr(provider, "_query_lots", lambda evidence: [])
+    monkeypatch.setattr(
+        provider,
+        "_query_street_segments",
+        lambda latitude, longitude: [
+            {
+                "attributes": {"id_seg": "SEG-ERRADO", "cd_log": "LOG-ERRADO"},
+                "geometry": {"paths": [[[0.0, 1.0], [10.0, 1.0]]]},
+            },
+            {
+                "attributes": {"id_seg": "SEG-CORRETO", "cd_log": "LOG-CORRETO"},
+                "geometry": {"paths": [[[0.0, 0.0], [10.0, 0.0]]]},
+            },
+        ],
+    )
+
+    resolved = provider.resolve(evidence())
+
+    assert resolved is not None
+    assert resolved.source == "goiania-official-property-number-road-access"
+    assert resolved.access_longitude == 5.0
+    assert resolved.access_latitude == 0.0
+
+
 def test_provider_falls_back_to_cadastral_lot_without_number_match(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     monkeypatch.setattr(provider, "_query_official_numbers", lambda evidence: [])
