@@ -90,13 +90,15 @@ def _serialize_license(license_record, now=None) -> dict:
 def _serialize(result) -> dict:
     return {
         "summary": {
-            "imported_deliveries": result.eligible_delivery_count + result.pending_count,
+            "imported_deliveries": result.eligible_delivery_count,
             "eligible_deliveries": result.eligible_delivery_count,
             "routed_deliveries": result.routed_delivery_count,
             "physical_stops": result.physical_stop_count,
             "routed_stops": result.routed_stop_count,
             "pending": result.pending_count,
             "coverage_complete": result.coverage_complete,
+            "routing_complete": result.routing_complete,
+            "unroutable_legs": result.route_metrics.unroutable_legs,
             "fully_resolved": result.fully_resolved,
             "distance_meters": result.route_metrics.distance_meters,
             "duration_seconds": result.route_metrics.duration_seconds,
@@ -145,6 +147,7 @@ def _serialize(result) -> dict:
                 "to_id": leg.to_id,
                 "distance_meters": leg.distance_meters,
                 "duration_seconds": leg.duration_seconds,
+                "routable": leg.routable,
             }
             for leg in result.route_metrics.legs
         ],

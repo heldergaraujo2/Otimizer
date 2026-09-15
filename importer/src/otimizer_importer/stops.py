@@ -9,12 +9,6 @@ DEFAULT_ADDRESS_TOLERANCE_METERS = 50.0
 
 
 def coordinate_key(latitude: float, longitude: float, precision: int = 6) -> tuple[float, float]:
-    """Create a deterministic physical-location key.
-
-    Coordinates are the spatial index, while address, house number, Quadra and
-    Lote are independent identity evidence. Missing evidence does not block a
-    merge; contradictory known evidence does.
-    """
     return round(latitude, precision), round(longitude, precision)
 
 
@@ -43,7 +37,6 @@ def _normalize_number(value: str | None) -> str | None:
 
 
 def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str | None, str | None]:
-    """Return independent address identity evidence for one delivery."""
     return (
         delivery.normalized_address or _normalize_address(delivery.address),
         _normalize_number(delivery.number),
@@ -53,25 +46,16 @@ def _location_evidence(delivery: Delivery) -> tuple[str | None, str | None, str 
 
 
 def _property_compatible(first: Delivery, second: Delivery) -> bool:
-    """Reject a merge when any known identity field contradicts."""
-    return all(
-        left is None or right is None or left == right
-        for left, right in zip(_location_evidence(first), _location_evidence(second))
-    )
+    return all(left is None or right is None or left == right for left, right in zip(_location_evidence(first), _location_evidence(second)))
 
 
 def _has_shared_strong_evidence(first: Delivery, second: Delivery) -> bool:
-    """Require at least one explicit shared identity field for GPS-jitter merges."""
     first_evidence = _location_evidence(first)
     second_evidence = _location_evidence(second)
-    return any(
-        left is not None and left == right
-        for left, right in zip(first_evidence, second_evidence)
-    )
+    return any(left is not None and left == right for left, right in zip(first_evidence, second_evidence))
 
 
 def _distance_meters(first: Delivery, second: Delivery) -> float:
-    """Return great-circle distance between two delivery coordinates."""
     earth_radius_m = 6_371_000.0
     lat1 = math.radians(first.latitude)
     lat2 = math.radians(second.latitude)
@@ -81,81 +65,47 @@ def _distance_meters(first: Delivery, second: Delivery) -> float:
     return 2 * earth_radius_m * math.asin(math.sqrt(a))
 
 
-def group_physical_stops(
-    deliveries: list[Delivery],
-    *,
-    address_tolerance_meters: float = DEFAULT_ADDRESS_TOLERANCE_METERS,
-) -> list[PhysicalStop]:
-    """Group deliveries into physical stops without using source Stop/Sequence.
+def _pending_key(delivery: Delivery) -> tuple[object, ...]:
+    address, number, quadra, lote = _location_evidence(delivery)
+    return (address, number, quadra, lote, _normalize_text(delivery.zipcode), _normalize_text(delivery.neighborhood), _normalize_text(delivery.city))
 
-    The decision uses latitude/longitude together with every available identity
-    field: normalized address, house number, Quadra and Lote. Missing fields are
-    neutral. Explicit conflicts remain separate. Distinct coordinates can be
-    reconciled for GPS jitter only when at least one explicit identity field
-    agrees and all known fields remain compatible.
-    """
+
+def group_physical_stops(deliveries: list[Delivery], *, address_tolerance_meters: float = DEFAULT_ADDRESS_TOLERANCE_METERS) -> list[PhysicalStop]:
+    """Group deliveries while preserving pending-location deliveries as route stops."""
     if address_tolerance_meters < 0:
         raise ValueError("address_tolerance_meters cannot be negative")
 
     grouped: dict[tuple[float, float], list[Delivery]] = defaultdict(list)
+    pending: list[Delivery] = []
     for delivery in deliveries:
-        # Deliveries without a complete GPS pair are preserved by the import
-        # layer and handled by the geolocation stage before routing. They
-        # cannot form a routable PhysicalStop at this stage.
         if delivery.latitude is None or delivery.longitude is None:
-            continue
-        grouped[coordinate_key(delivery.latitude, delivery.longitude)].append(delivery)
+            pending.append(delivery)
+        else:
+            grouped[coordinate_key(delivery.latitude, delivery.longitude)].append(delivery)
 
-    stops: list[PhysicalStop] = []
-
+    resolved_stops: list[PhysicalStop] = []
     for latitude, longitude in grouped:
         members = grouped[(latitude, longitude)]
         split_members: list[list[Delivery]] = []
         for member in members:
-            target = next(
-                (
-                    existing
-                    for existing in split_members
-                    if all(_property_compatible(member, candidate) for candidate in existing)
-                ),
-                None,
-            )
+            target = next((existing for existing in split_members if all(_property_compatible(member, candidate) for candidate in existing)), None)
             if target is None:
                 target = []
                 split_members.append(target)
             target.append(member)
-
         for member_group in split_members:
-            stops.append(
-                PhysicalStop(
-                    id=f"stop-{len(stops) + 1:04d}",
-                    latitude=latitude,
-                    longitude=longitude,
-                    deliveries=member_group,
-                )
-            )
+            resolved_stops.append(PhysicalStop(id=f"stop-{len(resolved_stops) + 1:04d}", latitude=latitude, longitude=longitude, deliveries=member_group))
 
-    # Reconcile neighboring GPS points only when explicit location evidence
-    # agrees. Proximity alone never merges two unrelated addresses. Check every
-    # member already in the candidate stop to prevent transitive conflicts.
     reconciled: list[PhysicalStop] = []
-    for stop in stops:
+    for stop in resolved_stops:
         representative = stop.deliveries[0]
         matching_stop = next(
             (
                 candidate
                 for candidate in reconciled
                 if _distance_meters(representative, candidate.deliveries[0]) <= address_tolerance_meters
-                and all(
-                    _has_shared_strong_evidence(representative, existing)
-                    and _property_compatible(representative, existing)
-                    for existing in candidate.deliveries
-                )
-                and all(
-                    _property_compatible(delivery, existing)
-                    for delivery in stop.deliveries
-                    for existing in candidate.deliveries
-                )
+                and all(_has_shared_strong_evidence(representative, existing) and _property_compatible(representative, existing) for existing in candidate.deliveries)
+                and all(_property_compatible(delivery, existing) for delivery in stop.deliveries for existing in candidate.deliveries)
             ),
             None,
         )
@@ -164,4 +114,15 @@ def group_physical_stops(
         else:
             matching_stop.deliveries.extend(stop.deliveries)
 
-    return reconciled
+    pending_groups: dict[tuple[object, ...], list[Delivery]] = {}
+    for delivery in pending:
+        key = _pending_key(delivery)
+        if not any(key):
+            key = ("row", delivery.row_number)
+        pending_groups.setdefault(key, []).append(delivery)
+
+    pending_stops = [
+        PhysicalStop(id=f"stop-{len(reconciled) + index + 1:04d}", latitude=None, longitude=None, deliveries=member_group)
+        for index, member_group in enumerate(pending_groups.values())
+    ]
+    return reconciled + pending_stops

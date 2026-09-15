@@ -70,8 +70,8 @@ def test_real_world_case_missing_sequence_and_dash_values_keeps_every_valid_deli
     assert result.data_rows_seen == 4
     assert result.eligible_delivery_count == 4
     assert result.unresolved_rows == ()
-    assert len(stops) == 2
-    assert sum(stop.delivery_count for stop in stops) == 3
+    assert len(stops) == 3
+    assert sum(stop.delivery_count for stop in stops) == 4
     assert {delivery.tracking_number for delivery in result.deliveries} == {
         "TN-001",
         "TN-002",
@@ -117,6 +117,7 @@ def test_multiple_deliveries_at_one_location_are_one_routed_physical_stop(tmp_pa
     assert len(stops) == 1
     assert stops[0].delivery_count == 4
     assert len({delivery.tracking_number for delivery in stops[0].deliveries}) == 4
+
 
 def test_missing_gps_preserves_delivery_for_later_geolocation(tmp_path: Path):
     path = tmp_path / "case_missing_gps_preserved.xlsx"
