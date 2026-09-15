@@ -83,6 +83,8 @@ def import_result(path: str | Path) -> ImportResult:
         data_rows_seen = 0
 
         for row_number, row in enumerate(rows, start=2):
+            if not any(_text(value) is not None for value in row):
+                continue
             data_rows_seen += 1
             latitude = _coordinate(get(row, "Latitude"))
             longitude = _longitude(get(row, "Longitude"))
