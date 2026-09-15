@@ -76,6 +76,7 @@ def test_large_best_effort_preserves_a_low_missing_path_outside_beam():
         matrix[index][index + 1] = TravelMetric(10, 10)
     for index in range(1, size):
         matrix[0][index] = TravelMetric(1, 1)
+    matrix[0][1] = None
 
     destination = RouteEndpoint(-16.80, -49.30, "final")
     destination_metrics = tuple(None for _ in range(size))
