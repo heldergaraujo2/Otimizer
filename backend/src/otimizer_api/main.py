@@ -306,11 +306,9 @@ def create_app(
     return api
 
 
-from otimizer_api.persistence import (
-    SQLitePaymentRepository,
-    build_sqlite_services,
-)
+from otimizer_api.persistence import SQLitePaymentRepository, build_sqlite_services
 from otimizer_api.payments import SandboxPixGateway
+from otimizer_importer.goiania import GoianiaLocationProvider
 
 
 def _database_path() -> Path:
@@ -328,9 +326,11 @@ _payment_service = PaymentService(
     _payment_gateway,
     _license_authorizer.repository,
 )
+_location_provider = GoianiaLocationProvider()
 
 app = create_app(
     auth_service=_auth_service,
     license_authorizer=_license_authorizer,
     payment_service=_payment_service,
+    location_provider=_location_provider,
 )
