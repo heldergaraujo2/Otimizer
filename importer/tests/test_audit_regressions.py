@@ -66,6 +66,26 @@ def test_two_opt_with_destination_can_improve_by_moving_final_stop():
     assert result.destination_metric == TravelMetric(1, 1)
 
 
+def test_empty_route_with_endpoints_returns_empty_result():
+    origin = RouteEndpoint(-16.69, -49.19, "depot")
+    destination = RouteEndpoint(-16.85, -49.25, "customer")
+    problem = OptimizationProblem.from_full_matrix(
+        (),
+        (
+            (TravelMetric(0, 0), TravelMetric(10, 10)),
+            (TravelMetric(10, 10), TravelMetric(0, 0)),
+        ),
+        origin=origin,
+        destination=destination,
+    )
+
+    result = optimize(problem)
+
+    assert result.route.physical_stop_count == 0
+    assert result.origin_metric is None
+    assert result.destination_metric is None
+
+
 def test_xlsx_blank_rows_are_not_imported_as_deliveries(tmp_path):
     workbook = Workbook()
     sheet = workbook.active
