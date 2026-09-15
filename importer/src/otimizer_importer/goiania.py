@@ -20,6 +20,12 @@ OFFICIAL_NUMBER_LAYER_ID = 5
 STREET_SEGMENT_LAYER_ID = 7
 
 
+class _ApproximateResolvedLocation(ResolvedLocation):
+    @property
+    def is_approximate(self) -> bool:
+        return True
+
+
 class GoianiaLocationProvider(LocationDataProvider):
     """Resolve delivery evidence using Goiânia cadastral data."""
 
@@ -126,11 +132,11 @@ class GoianiaLocationProvider(LocationDataProvider):
 
         features = self._query_lots(evidence)
         if not features:
-            return None
+            return self._street_fallback(evidence)
         best = min(features, key=lambda feature: _distance_sq_to_geometry(evidence, feature.get("geometry") or {}))
         property_point = _representative_point(best.get("geometry") or {})
         if property_point is None:
-            return None
+            return self._street_fallback(evidence)
 
         attributes = best.get("attributes") or {}
         cadastral_id = attributes.get("id")
@@ -149,6 +155,38 @@ class GoianiaLocationProvider(LocationDataProvider):
             confidence=0.80,
             source="goiania-cadastral-lot",
             cadastral_id=cadastral_id,
+        )
+
+    def _street_fallback(self, evidence: LocationEvidence) -> ResolvedLocation | None:
+        """Use the known street segment as an explicitly approximate route point."""
+        if evidence.latitude is None or evidence.longitude is None:
+            return None
+        segments = self._query_street_segments(evidence.latitude, evidence.longitude)
+        if not segments:
+            return None
+
+        property_point = (evidence.longitude, evidence.latitude)
+        best: tuple[float, tuple[float, float]] | None = None
+        for feature in segments:
+            for path in (feature.get("geometry") or {}).get("paths") or []:
+                for start, end in zip(path, path[1:]):
+                    candidate = _nearest_point_on_segment(property_point, start, end)
+                    distance = (candidate[0] - property_point[0]) ** 2 + (candidate[1] - property_point[1]) ** 2
+                    if best is None or distance < best[0]:
+                        best = (distance, candidate)
+        if best is None:
+            return None
+
+        route_point = best[1]
+        return _ApproximateResolvedLocation(
+            latitude=route_point[1],
+            longitude=route_point[0],
+            confidence=0.55,
+            source="goiania-street-fallback",
+            property_latitude=evidence.latitude,
+            property_longitude=evidence.longitude,
+            access_latitude=route_point[1],
+            access_longitude=route_point[0],
         )
 
     def _query_lots(self, evidence: LocationEvidence) -> list[dict]:
