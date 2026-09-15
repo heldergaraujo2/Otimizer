@@ -92,6 +92,7 @@ def test_optimize_returns_frontend_ready_route_result():
 
     assert response.status_code == 200
     payload = response.json()
+    assert payload["summary"]["imported_deliveries"] == 3
     assert payload["summary"]["eligible_deliveries"] == 3
     assert payload["summary"]["routed_deliveries"] == 3
     assert payload["summary"]["physical_stops"] == 2
@@ -145,14 +146,23 @@ def test_optimize_rejects_invalid_endpoint_pair():
     assert "both latitude and longitude" in response.json()["detail"]
 
 
-def test_optimize_rejects_workbook_without_valid_coordinates():
+def test_optimize_preserves_workbook_rows_without_valid_coordinates():
     client = TestClient(create_app(FakeRoutingProvider()))
     response = post_workbook(client, workbook_bytes([
         ["1", "-", "-", "TN-1", "Rua A", "Centro", "Goiania", "74000-000", None, -49.25],
         ["2", "-", "-", "TN-2", "Rua B", "Centro", "Goiania", "74000-001", "invalid", None],
     ]))
-    assert response.status_code == 422
-    assert "no deliveries with valid latitude and longitude" in response.json()["detail"]
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["summary"]["imported_deliveries"] == 2
+    assert payload["summary"]["eligible_deliveries"] == 0
+    assert payload["summary"]["routed_deliveries"] == 0
+    assert payload["summary"]["pending"] == 2
+    assert payload["summary"]["coverage_complete"] is True
+    assert payload["summary"]["fully_resolved"] is False
+    assert payload["unresolved_rows"] == [2, 3]
+    assert payload["route"] == []
+    assert payload["legs"] == []
 
 
 def test_optimize_handles_all_deliveries_at_one_physical_stop():
