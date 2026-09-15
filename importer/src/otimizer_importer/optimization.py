@@ -160,10 +160,22 @@ def _heuristic_starts(problem):
         return tuple(range(len(problem.stops)))
     limit = min(12, len(reachable))
     ranked = sorted(reachable, key=lambda index: (*_metric_cost(problem.origin_metrics[index], problem.objective), index))
-    selected = ranked[:limit]
-    if len(reachable) > limit:
-        step = max(1, len(ranked) // limit)
-        selected = sorted(set(selected + ranked[::step]))[:limit]
+    if len(reachable) <= limit:
+        return tuple(ranked)
+
+    # Keep the best origin candidates, but reserve a few slots for a
+    # deterministic spread across the remaining candidates. This prevents a
+    # valid start from being dropped solely because it has a slightly worse
+    # origin leg while its route basin is substantially better.
+    top_count = min(8, limit)
+    selected = list(ranked[:top_count])
+    tail = ranked[top_count:]
+    spread_count = limit - top_count
+    if spread_count == 1:
+        positions = [len(tail) - 1]
+    else:
+        positions = [round(index * (len(tail) - 1) / (spread_count - 1)) for index in range(spread_count)]
+    selected.extend(tail[position] for position in positions)
     return tuple(selected)
 
 
