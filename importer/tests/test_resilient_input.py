@@ -2,9 +2,9 @@ from pathlib import Path
 
 from openpyxl import Workbook
 
-from otimizer_importer.models import PhysicalStop
 from otimizer_importer.routing import parse_osrm_table
 from otimizer_importer.service import optimize_deliveries_file
+from otimizer_importer.xlsx import import_result
 
 
 HEADERS = [
@@ -33,8 +33,6 @@ def test_xlsx_without_gps_columns_is_importable(tmp_path: Path):
     path = tmp_path / "without-gps.xlsx"
     write_xlsx(path, [["ID-1", 1, 1, "TN-1", "Rua A, 10", "Centro", "Cidade", "74000-000"]])
 
-    from otimizer_importer.xlsx import import_result
-
     result = import_result(path)
 
     assert result.data_rows_seen == 1
@@ -50,8 +48,6 @@ def test_zero_zero_gps_is_preserved_as_missing_location(tmp_path: Path):
         [["ID-1", 1, 1, "TN-1", "Rua SR 2 qd 30 lt 24, Sn, qd 30 lt 24", "Setor A", "Goiania", "74000-000", 0, 0]],
         include_gps=True,
     )
-
-    from otimizer_importer.xlsx import import_result
 
     result = import_result(path)
 
@@ -101,34 +97,3 @@ def test_negative_metric_becomes_unavailable_edge_instead_of_fatal_error():
     matrix = parse_osrm_table(payload, expected_size=2)
 
     assert matrix[0][1] is None
-
-
-class _FakeRoutingProvider:
-    def table(self, locations):
-        size = len(locations)
-        return tuple(
-            tuple(
-                None if row != column + 1 else None
-                for column in range(size)
-            )
-            for row in range(size)
-        )
-
-
-def _stop(identifier: str, latitude: float, longitude: float) -> PhysicalStop:
-    from otimizer_importer.models import Delivery
-
-    delivery = Delivery(
-        row_number=int(identifier),
-        source_id=None,
-        source_sequence=None,
-        source_stop=None,
-        tracking_number=identifier,
-        address=None,
-        neighborhood=None,
-        city=None,
-        zipcode=None,
-        latitude=latitude,
-        longitude=longitude,
-    )
-    return PhysicalStop(identifier, latitude, longitude, [delivery])
