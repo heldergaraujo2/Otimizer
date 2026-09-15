@@ -97,6 +97,8 @@ def _serialize(result) -> dict:
             "routed_stops": result.routed_stop_count,
             "pending": result.pending_count,
             "coverage_complete": result.coverage_complete,
+            "routing_complete": result.routing_complete,
+            "unroutable_legs": result.route_metrics.unroutable_legs,
             "fully_resolved": result.fully_resolved,
             "distance_meters": result.route_metrics.distance_meters,
             "duration_seconds": result.route_metrics.duration_seconds,
@@ -145,6 +147,7 @@ def _serialize(result) -> dict:
                 "to_id": leg.to_id,
                 "distance_meters": leg.distance_meters,
                 "duration_seconds": leg.duration_seconds,
+                "routable": leg.routable,
             }
             for leg in result.route_metrics.legs
         ],
@@ -187,11 +190,7 @@ def create_app(
         if result is None:
             raise HTTPException(status_code=401, detail="Invalid email or password")
         account, token = result
-        return {
-            "access_token": token,
-            "token_type": "bearer",
-            "account": {"account_id": account.account_id, "email": account.email},
-        }
+        return {"access_token": token, "token_type": "bearer", "account": {"account_id": account.account_id, "email": account.email}}
 
     @api.get("/auth/me")
     def me(authorization: Annotated[str | None, Header()] = None) -> dict:
@@ -211,18 +210,13 @@ def create_app(
         account = authenticated_account(authorization)
         if license_authorizer is None:
             raise HTTPException(status_code=503, detail="Licensing is not configured")
-        license_record = license_authorizer.repository.get_active_license(
-            account.account_id, datetime.now(timezone.utc)
-        )
+        license_record = license_authorizer.repository.get_active_license(account.account_id, datetime.now(timezone.utc))
         if license_record is None:
             return {"active": False, "license": None}
         return {"active": True, "license": _serialize_license(license_record)}
 
     @api.post("/payments/pix")
-    def create_pix_charge(
-        payload: PixChargeRequest,
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> dict:
+    def create_pix_charge(payload: PixChargeRequest, authorization: Annotated[str | None, Header()] = None) -> dict:
         account = authenticated_account(authorization)
         if payment_service is None or payment_service.license_repository is None:
             raise HTTPException(status_code=503, detail="Payments are not configured")
@@ -236,10 +230,7 @@ def create_app(
         return _serialize_charge(charge)
 
     @api.get("/payments/pix/{payment_id}")
-    def get_pix_charge(
-        payment_id: str,
-        authorization: Annotated[str | None, Header()] = None,
-    ) -> dict:
+    def get_pix_charge(payment_id: str, authorization: Annotated[str | None, Header()] = None) -> dict:
         account = authenticated_account(authorization)
         if payment_service is None:
             raise HTTPException(status_code=503, detail="Payments are not configured")
@@ -265,35 +256,27 @@ def create_app(
             if authenticated is None:
                 raise HTTPException(status_code=401, detail="Authentication is required")
             account_id = authenticated.account.account_id
-
         if license_authorizer is not None:
             if not account_id or not account_id.strip():
                 raise HTTPException(status_code=401, detail="Authentication is required")
             decision = license_authorizer.authorize_route(account_id.strip())
             if not decision.allowed:
                 raise HTTPException(status_code=403, detail={"code": decision.code, "message": decision.message})
-
         if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
             raise HTTPException(status_code=422, detail="The uploaded file must be an .xlsx workbook")
         origin = _endpoint(origin_latitude, origin_longitude, "origin")
         destination = _endpoint(destination_latitude, destination_longitude, "destination")
         if destination is not None and return_to_start:
             raise HTTPException(status_code=422, detail="destination and return_to_start cannot be combined")
-
         max_bytes = _max_upload_bytes()
         contents = await file.read(max_bytes + 1)
         if len(contents) > max_bytes:
             raise HTTPException(status_code=413, detail=f"Uploaded file exceeds the {max_bytes} byte limit")
-
         with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as temporary:
             temporary.write(contents)
             temporary_path = Path(temporary.name)
         try:
-            result = optimize_deliveries_file(
-                str(temporary_path), routing_provider=routing_provider,
-                location_provider=location_provider, origin=origin,
-                destination=destination, return_to_start=return_to_start, objective=objective,
-            )
+            result = optimize_deliveries_file(str(temporary_path), routing_provider=routing_provider, location_provider=location_provider, origin=origin, destination=destination, return_to_start=return_to_start, objective=objective)
         except RoutingError as exc:
             raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc
         except OptimizationError as exc:
@@ -322,16 +305,7 @@ def _database_path() -> Path:
 _database, _auth_service, _license_authorizer = build_sqlite_services(_database_path())
 _payment_repository = SQLitePaymentRepository(_database)
 _payment_gateway = SandboxPixGateway(_payment_repository)
-_payment_service = PaymentService(
-    _payment_repository,
-    _payment_gateway,
-    _license_authorizer.repository,
-)
+_payment_service = PaymentService(_payment_repository, _payment_gateway, _license_authorizer.repository)
 _location_provider = GoianiaLocationProvider()
 
-app = create_app(
-    auth_service=_auth_service,
-    license_authorizer=_license_authorizer,
-    payment_service=_payment_service,
-    location_provider=_location_provider,
-)
+app = create_app(auth_service=_auth_service, license_authorizer=_license_authorizer, payment_service=_payment_service, location_provider=_location_provider)
