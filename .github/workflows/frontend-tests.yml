@@ -18,4 +18,10 @@ jobs:
           node-version: "22"
 
       - name: Validate JavaScript syntax
-        run: node --check frontend/app.js
+        run: |
+          node --check frontend/app.js
+          node --check frontend/route-safety.js
+          node --check frontend/tests/route-safety.test.js
+
+      - name: Run frontend route safety tests
+        run: node --test frontend/tests/route-safety.test.js
