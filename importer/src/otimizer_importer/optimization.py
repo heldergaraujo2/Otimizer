@@ -231,13 +231,11 @@ def _two_opt(order, problem):
 
 
 def _best_effort_order(problem):
-    """Return every stop even when some road legs are unavailable."""
+    """Return every stop while minimizing unavailable legs before route cost."""
     size = len(problem.stops)
     if size == 0:
         return ()
     starts = _heuristic_starts(problem) or (problem.start_index,)
-    # Keep the missing-leg objective exact through 14 stops, then use the
-    # scalable heuristic for larger routes.
     if size <= 14:
         best = None
         for start in starts:
@@ -288,47 +286,51 @@ def _best_effort_order(problem):
                 best = candidate
         return best[2]
 
+    # A bounded beam keeps the primary missing-leg objective visible several
+    # steps ahead without the factorial cost of exact search. The beam is
+    # deterministic and each expansion retains missing legs as the first key.
+    beam_width = 64
     best = None
     for start in starts:
-        remaining = set(range(size))
-        remaining.remove(start)
-        order = [start]
-        current = start
-        missing = 0
-        cost = (0.0, 0.0)
+        initial_missing = 0
+        initial_cost = (0.0, 0.0)
         if problem.origin_metrics is not None:
             metric = problem.origin_metrics[start]
             if metric is None:
-                missing += 1
+                initial_missing = 1
             else:
-                cost = _add_cost(cost, _metric_cost(metric, problem.objective))
-        while remaining:
-            choices = []
-            for candidate in remaining:
-                metric = problem.matrix[current][candidate]
-                choices.append((0, _metric_cost(metric, problem.objective), candidate) if metric is not None else (1, (float("inf"), float("inf")), candidate))
-            edge_missing, edge_cost, next_index = min(choices, key=lambda choice: (choice[0], choice[1], choice[2]))
-            missing += edge_missing
-            if edge_missing == 0:
-                cost = _add_cost(cost, edge_cost)
-            order.append(next_index)
-            remaining.remove(next_index)
-            current = next_index
-        if problem.destination_metrics is not None:
-            metric = problem.destination_metrics[current]
-            if metric is None:
-                missing += 1
-            else:
-                cost = _add_cost(cost, _metric_cost(metric, problem.objective))
-        elif problem.return_to_start:
-            metric = problem.matrix[current][start]
-            if metric is None:
-                missing += 1
-            else:
-                cost = _add_cost(cost, _metric_cost(metric, problem.objective))
-        candidate = (missing, cost, tuple(order))
-        if best is None or candidate < best:
-            best = candidate
+                initial_cost = _add_cost(initial_cost, _metric_cost(metric, problem.objective))
+        states = [(initial_missing, initial_cost, (start,), start)]
+        remaining_all = frozenset(range(size))
+        for _ in range(size - 1):
+            expanded = []
+            for missing, cost, order, current in states:
+                remaining = remaining_all.difference(order)
+                for next_index in remaining:
+                    metric = problem.matrix[current][next_index]
+                    edge_missing = int(metric is None)
+                    edge_cost = (0.0, 0.0) if metric is None else _metric_cost(metric, problem.objective)
+                    expanded.append((missing + edge_missing, _add_cost(cost, edge_cost), order + (next_index,), next_index))
+            expanded.sort(key=lambda state: (state[0], state[1], state[2]))
+            states = expanded[:beam_width]
+        for missing, cost, order, current in states:
+            endpoint_missing = 0
+            endpoint_cost = (0.0, 0.0)
+            if problem.destination_metrics is not None:
+                metric = problem.destination_metrics[current]
+                if metric is None:
+                    endpoint_missing = 1
+                else:
+                    endpoint_cost = _metric_cost(metric, problem.objective)
+            elif problem.return_to_start:
+                metric = problem.matrix[current][start]
+                if metric is None:
+                    endpoint_missing = 1
+                else:
+                    endpoint_cost = _metric_cost(metric, problem.objective)
+            candidate = (missing + endpoint_missing, _add_cost(cost, endpoint_cost), order)
+            if best is None or candidate < best:
+                best = candidate
     return best[2]
 
 
