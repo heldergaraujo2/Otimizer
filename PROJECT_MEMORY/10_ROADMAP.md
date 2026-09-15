@@ -114,6 +114,22 @@ Validar no computador do usuário, sem alterar os XLSX:
 - Adicionar mais casos de endereço incompleto e conflitos de evidência.
 - Criar cache/index local das geometrias quando a carga real justificar.
 
+### Regra obrigatória de fallback — rua correta
+
+Quando não for possível determinar com segurança o ponto exato da propriedade, **a parada não deve ser descartada nem retirada da otimização se a rua correta puder ser determinada com confiança suficiente**.
+
+Hierarquia operacional:
+
+1. GPS válido e confiável → usar o ponto geográfico disponível.
+2. Quadra + lote e demais evidências cadastrais → localizar a propriedade e tentar determinar o ponto de acesso viário.
+3. Propriedade localizada, mas acesso exato não determinado → procurar o trecho/face de logradouro correspondente ao lote.
+4. Ponto exato da propriedade indisponível, mas rua correta identificada → criar um **ponto de fallback na rua correta**, preferencialmente no trecho relacionado ao endereço/lote, e manter a parada na matriz de roteamento e na otimização.
+5. Somente quando nem a rua correta puder ser determinada com confiança suficiente → manter a entrega como pendente de geolocalização, sem inventar coordenadas.
+
+O ponto de fallback deve ser explicitamente identificado como **aproximado**, separado do ponto da propriedade e do ponto de acesso exato. O objetivo operacional é permitir que o motorista chegue à rua correta e use `quadra + lote` e demais informações do endereço para localizar a residência/propriedade.
+
+Essa regra é parte dos critérios de qualidade do produto: **uma entrega válida nunca deve ser perdida apenas porque o sistema não conseguiu cravar o alfinete na porta do imóvel.**
+
 ### Prioridade B — Estabilizar produção
 - Confirmar todos os workflows do GitHub Actions verdes.
 - Resolver qualquer divergência entre ambiente local e CI.
@@ -150,7 +166,8 @@ Depois da estabilidade técnica:
 - Nenhum PhysicalStop válido desaparecendo da rota.
 - Localização cadastral funcionando quando houver evidência suficiente.
 - Entregas sem GPS não são descartadas.
-- Pontos de propriedade e acesso viário tratados corretamente.
+- Quando o ponto exato não puder ser cravado, a rua correta é usada como fallback sempre que puder ser determinada com confiança suficiente.
+- Pontos de propriedade, acesso exato e fallback de rua tratados corretamente e identificados por nível de confiança.
 - Rota calculada por malha viária real.
 - Mapa, sequência e navegação coerentes.
 - Três XLSX reais validados no PC.
