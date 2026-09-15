@@ -201,8 +201,31 @@ def optimize_deliveries_file(
         list(imported.deliveries),
         location_provider,
     )
+
+    unresolved_rows = tuple(
+        sorted(set(imported.unresolved_rows) | set(missing_location_rows))
+    )
+
+    # A workbook can be valid while every delivery is pending geolocation.
+    # Return an auditable empty route instead of converting a data-quality
+    # limitation into a fatal optimization error.
     if not deliveries:
-        raise ValueError("Workbook contains no deliveries with resolvable location")
+        empty_route = Route.from_physical_stops([])
+        empty_result = OptimizationResult(
+            route=empty_route,
+            objective=objective,
+            start_index=None,
+            return_to_start=False,
+            origin=None,
+            destination=None,
+        )
+        return OptimizationServiceResult(
+            eligible_delivery_count=0,
+            unresolved_rows=unresolved_rows,
+            physical_stops=(),
+            optimization=empty_result,
+            route_metrics=RouteMetrics(0.0, 0.0, ()),
+        )
 
     physical_stops = group_physical_stops(deliveries)
     physical_stops = _resolve_physical_stops(physical_stops, location_provider)
@@ -233,9 +256,6 @@ def optimize_deliveries_file(
         origin_metric=result.origin_metric,
         destination_id=result.destination.id if result.destination is not None else None,
         destination_metric=result.destination_metric,
-    )
-    unresolved_rows = tuple(
-        sorted(set(imported.unresolved_rows) | set(missing_location_rows))
     )
     service_result = OptimizationServiceResult(
         eligible_delivery_count=len(deliveries),
