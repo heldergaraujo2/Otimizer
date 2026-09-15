@@ -5,6 +5,7 @@ let markers = [];
 let routeLine;
 let currentRoute = [];
 let selectedIndex = -1;
+let visitedStops = new Set();
 let accessToken = sessionStorage.getItem("otimizer_access_token") || "";
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
@@ -81,6 +82,26 @@ function locationSummary(stop) {
   return `Localização resolvida${percentage}`;
 }
 
+function stopIcon(stop, visited = false) {
+  const visitedClass = visited ? " visited" : "";
+  return L.divIcon({
+    className: "otimizer-stop-marker",
+    html: `<span class="${visitedClass.trim()}">${stop.sequence}</span>`,
+    iconSize: [36, 36],
+    iconAnchor: [18, 18]
+  });
+}
+
+function markStopVisited(index) {
+  if (index < 0 || index >= currentRoute.length) return;
+  visitedStops.add(index);
+  const stop = currentRoute[index];
+  const marker = markers[index];
+  if (marker && typeof L !== "undefined") marker.setIcon(stopIcon(stop, true));
+  const element = document.querySelector(`.stop[data-index="${index}"]`);
+  if (element) element.classList.add("visited");
+}
+
 async function fetchRouteGeometry(route) {
   if (route.length < 2) return null;
   const coordinates = route.map(stop => `${stop.longitude},${stop.latitude}`).join(";");
@@ -107,13 +128,7 @@ async function renderMap(route) {
     map._otimizerTiles = true;
   }
   route.forEach((stop, index) => {
-    const markerIcon = L.divIcon({
-      className: "otimizer-stop-marker",
-      html: `<span>${stop.sequence}</span>`,
-      iconSize: [36, 36],
-      iconAnchor: [18, 18]
-    });
-    const marker = L.marker([stop.latitude, stop.longitude], { icon: markerIcon }).addTo(map);
+    const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon(stop, visitedStops.has(index)) }).addTo(map);
     marker.bindPopup(`<strong>Parada ${stop.sequence}</strong><br>${escapeHtml(stop.deliveries?.[0]?.address || "Endereço não informado")}`);
     marker.on("click", () => showStop(index));
     markers.push(marker);
@@ -154,13 +169,17 @@ function showStop(index) {
   `;
   $("stop-detail").hidden = false;
   $("next-stop").hidden = index >= currentRoute.length - 1;
-  document.querySelectorAll(".stop").forEach((element, itemIndex) => element.classList.toggle("selected", itemIndex === index));
+  document.querySelectorAll(".stop").forEach((element, itemIndex) => {
+    element.classList.toggle("selected", itemIndex === index);
+    element.classList.toggle("visited", visitedStops.has(itemIndex));
+  });
 }
 
 function renderStops(route) {
   $("stops").innerHTML = route.map((stop, index) => {
     const primary = stop.deliveries?.[0] || {};
-    return `<article class="stop" data-index="${index}" tabindex="0"><div class="stop-number">${stop.sequence}</div><div><h3>${escapeHtml(primary.address || "Endereço não informado")}</h3><p>${escapeHtml(primary.city || "")}</p><p>${stop.delivery_count} entrega(s)</p></div></article>`;
+    const visitedClass = visitedStops.has(index) ? " visited" : "";
+    return `<article class="stop${visitedClass}" data-index="${index}" tabindex="0"><div class="stop-number">${stop.sequence}</div><div><h3>${escapeHtml(primary.address || "Endereço não informado")}</h3><p>${escapeHtml(primary.city || "")}</p><p>${stop.delivery_count} entrega(s)</p></div></article>`;
   }).join("");
   document.querySelectorAll(".stop").forEach((element) => {
     const index = Number(element.dataset.index);
@@ -291,7 +310,11 @@ $("file-input").addEventListener("change", (event) => {
 });
 
 $("close-detail").addEventListener("click", () => { $("stop-detail").hidden = true; selectedIndex = -1; });
-$("next-stop").addEventListener("click", () => { if (selectedIndex >= 0) showStop(selectedIndex + 1); });
+$("next-stop").addEventListener("click", () => {
+  if (selectedIndex < 0) return;
+  markStopVisited(selectedIndex);
+  if (selectedIndex < currentRoute.length - 1) showStop(selectedIndex + 1);
+});
 
 $("optimize").addEventListener("click", async () => {
   const file = $("file-input").files[0];
@@ -331,6 +354,7 @@ $("optimize").addEventListener("click", async () => {
     if (!Array.isArray(result.route) || !result.summary) throw Error("A API retornou uma resposta de rota inválida.");
 
     currentRoute = result.route;
+    visitedStops = new Set();
     $("result").hidden = false;
     $("delivery-count").textContent = result.summary.routed_deliveries;
     $("stop-count").textContent = result.summary.routed_stops;
