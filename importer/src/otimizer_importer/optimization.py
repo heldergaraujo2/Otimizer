@@ -371,8 +371,8 @@ def _optimize_order(problem):
 def optimize(problem: OptimizationProblem) -> OptimizationResult:
     order = _optimize_order(problem)
     ordered_stops = tuple(problem.stops[index] for index in order)
-    origin_metric = problem.origin_metrics[order[0]] if problem.origin_metrics is not None else None
-    destination_metric = problem.destination_metrics[order[-1]] if problem.destination_metrics is not None else None
+    origin_metric = problem.origin_metrics[order[0]] if problem.origin_metrics is not None and order else None
+    destination_metric = problem.destination_metrics[order[-1]] if problem.destination_metrics is not None and order else None
     return OptimizationResult(
         route=Route.from_physical_stops(list(ordered_stops)),
         objective=problem.objective,
