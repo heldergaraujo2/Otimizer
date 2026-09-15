@@ -236,7 +236,9 @@ def _best_effort_order(problem):
     if size == 0:
         return ()
     starts = _heuristic_starts(problem) or (problem.start_index,)
-    if size <= 12:
+    # Keep the missing-leg objective exact through 14 stops, then use the
+    # scalable heuristic for larger routes.
+    if size <= 14:
         best = None
         for start in starts:
             remaining = tuple(index for index in range(size) if index != start)
