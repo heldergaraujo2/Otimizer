@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 @dataclass(frozen=True)
 class Delivery:
     """One eligible spreadsheet row. Never merge deliveries at this layer."""
-
     row_number: int
     source_id: str | None
     source_sequence: str | None
@@ -25,10 +24,9 @@ class Delivery:
 @dataclass
 class PhysicalStop:
     """A real-world location containing one or more deliveries."""
-
     id: str
-    latitude: float
-    longitude: float
+    latitude: float | None
+    longitude: float | None
     deliveries: list[Delivery] = field(default_factory=list)
     location_confidence: float | None = None
     location_source: str | None = None
@@ -43,10 +41,16 @@ class PhysicalStop:
             raise ValueError("PhysicalStop.id cannot be empty")
         if not self.deliveries:
             raise ValueError("PhysicalStop must contain at least one delivery")
+        if (self.latitude is None) != (self.longitude is None):
+            raise ValueError("PhysicalStop latitude and longitude must be provided together")
         if self.location_confidence is not None and not 0.0 <= self.location_confidence <= 1.0:
             raise ValueError("PhysicalStop location confidence must be between 0 and 1")
         if (self.location_confidence is None) != (self.location_source is None):
             raise ValueError("PhysicalStop location confidence and source must be provided together")
+
+    @property
+    def is_pending_location(self) -> bool:
+        return self.latitude is None or self.longitude is None
 
     @property
     def delivery_count(self) -> int:
@@ -56,7 +60,6 @@ class PhysicalStop:
 @dataclass(frozen=True)
 class OptimizedRouteStop:
     """A physical stop after the optimizer assigns its route position."""
-
     sequence: int
     physical_stop: PhysicalStop
 
@@ -76,19 +79,13 @@ class OptimizedRouteStop:
 @dataclass(frozen=True)
 class Route:
     """An ordered, validated sequence of physical stops."""
-
     stops: tuple[OptimizedRouteStop, ...]
 
     @classmethod
     def from_physical_stops(cls, physical_stops: list[PhysicalStop]) -> "Route":
         if len({stop.id for stop in physical_stops}) != len(physical_stops):
             raise ValueError("Physical stop IDs must be unique")
-        return cls(
-            tuple(
-                OptimizedRouteStop(sequence=index, physical_stop=stop)
-                for index, stop in enumerate(physical_stops, start=1)
-            )
-        )
+        return cls(tuple(OptimizedRouteStop(sequence=index, physical_stop=stop) for index, stop in enumerate(physical_stops, start=1)))
 
     def __post_init__(self) -> None:
         expected = tuple(range(1, len(self.stops) + 1))
@@ -111,7 +108,6 @@ class Route:
 @dataclass(frozen=True)
 class ImportResult:
     """Auditable outcome of an XLSX import."""
-
     deliveries: tuple[Delivery, ...]
     unresolved_rows: tuple[int, ...]
     data_rows_seen: int
