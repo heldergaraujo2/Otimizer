@@ -92,7 +92,14 @@ def test_fetch_osrm_table_batches_large_matrix(monkeypatch):
     matrix = routing.fetch_osrm_table(locations, max_locations=3)
     assert len(requests) == 11
     assert all(len(request[2]) <= 3 for request in requests)
-    assert sum(1 for request in requests if request[0] == [0, 1] and request[1] == [0, 1] and len(request[2]) == 2) == 1
+    assert sum(
+        1
+        for request in requests
+        if request[0] == [0, 1]
+        and request[1] == [0, 1]
+        and request[2][0] == "-49.0,-16.0"
+        and request[2][1] == "-50.0,-17.0"
+    ) == 1
     assert len(matrix) == 5
     assert all(len(row) == 5 for row in matrix)
     assert all(value is not None for row in matrix for value in row)
