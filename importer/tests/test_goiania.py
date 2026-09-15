@@ -267,3 +267,44 @@ def test_provider_keeps_missing_gps_unresolved_instead_of_querying_point(monkeyp
 
     assert resolved is None
     assert calls == {"official": 0, "lots": 0}
+
+
+def test_provider_creates_approximate_street_fallback_when_property_is_not_resolved(monkeypatch):
+    """A known street may still provide a routable approximate point."""
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    monkeypatch.setattr(provider, "_query_official_numbers", lambda evidence: [])
+    monkeypatch.setattr(provider, "_query_lots", lambda evidence: [])
+    monkeypatch.setattr(
+        provider,
+        "_query_street_segments",
+        lambda latitude, longitude: [
+            {
+                "attributes": {"id_seg": "SEG-RUA-EXEMPLO", "cd_log": "LOG-123"},
+                "geometry": {"paths": [[[0.0, 0.0], [10.0, 0.0]]]}
+            }
+        ],
+    )
+
+    approximate = LocationEvidence(
+        latitude=5.0,
+        longitude=5.0,
+        address="Rua Exemplo, 999",
+        normalized_address="rua exemplo 999",
+        number="999",
+        quadra=None,
+        lote=None,
+        zipcode="74000-000",
+        neighborhood="Centro",
+        city="Goiânia",
+    )
+
+    resolved = provider.resolve(approximate)
+
+    assert resolved is not None
+    assert resolved.source == "goiania-street-fallback"
+    assert resolved.is_approximate is True
+    assert resolved.cadastral_id is None
+    assert resolved.longitude == 5.0
+    assert resolved.latitude == 0.0
+    assert resolved.access_longitude == 5.0
+    assert resolved.access_latitude == 0.0
