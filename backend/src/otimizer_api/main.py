@@ -90,6 +90,7 @@ def _serialize_license(license_record, now=None) -> dict:
 def _serialize(result) -> dict:
     return {
         "summary": {
+            "imported_deliveries": result.eligible_delivery_count + result.pending_count,
             "eligible_deliveries": result.eligible_delivery_count,
             "routed_deliveries": result.routed_delivery_count,
             "physical_stops": result.physical_stop_count,
