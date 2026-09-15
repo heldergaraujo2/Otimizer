@@ -90,7 +90,13 @@ function renderMap(route) {
     map._otimizerTiles = true;
   }
   route.forEach((stop, index) => {
-    const marker = L.marker([stop.latitude, stop.longitude]).addTo(map);
+    const markerIcon = L.divIcon({
+      className: "otimizer-stop-marker",
+      html: `<span>${stop.sequence}</span>`,
+      iconSize: [36, 36],
+      iconAnchor: [18, 18]
+    });
+    const marker = L.marker([stop.latitude, stop.longitude], { icon: markerIcon }).addTo(map);
     marker.bindPopup(`<strong>Parada ${stop.sequence}</strong><br>${escapeHtml(stop.deliveries?.[0]?.address || "Endereço não informado")}`);
     marker.on("click", () => showStop(index));
     markers.push(marker);
