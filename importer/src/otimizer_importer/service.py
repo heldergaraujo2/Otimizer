@@ -41,16 +41,21 @@ class OptimizationServiceResult:
 
     @property
     def coverage_complete(self) -> bool:
-        """Whether every eligible delivery and physical stop is routed."""
+        """Whether every eligible delivery and physical stop is present in the route."""
         return (
             self.routed_delivery_count == self.eligible_delivery_count
             and self.routed_stop_count == self.physical_stop_count
         )
 
     @property
+    def routing_complete(self) -> bool:
+        """Whether every route leg has a real road-network metric."""
+        return self.route_metrics.routing_complete
+
+    @property
     def fully_resolved(self) -> bool:
-        """Whether coverage is complete and there are no unresolved rows."""
-        return self.coverage_complete and self.pending_count == 0
+        """Whether data coverage, location resolution and road routing are complete."""
+        return self.coverage_complete and self.pending_count == 0 and self.routing_complete
 
 
 def _validate_route_coverage(
@@ -145,41 +150,22 @@ def _resolve_missing_coordinates(
     """Resolve deliveries that have no complete GPS pair before stop grouping."""
     if provider is None:
         return (
-            [
-                delivery
-                for delivery in deliveries
-                if delivery.latitude is not None and delivery.longitude is not None
-            ],
-            tuple(
-                delivery.row_number
-                for delivery in deliveries
-                if delivery.latitude is None or delivery.longitude is None
-            ),
+            [delivery for delivery in deliveries if delivery.latitude is not None and delivery.longitude is not None],
+            tuple(delivery.row_number for delivery in deliveries if delivery.latitude is None or delivery.longitude is None),
         )
 
     resolved_deliveries: list[Delivery] = []
     unresolved_rows: list[int] = []
-
     for delivery in deliveries:
         if delivery.latitude is not None and delivery.longitude is not None:
             resolved_deliveries.append(delivery)
             continue
-
         evidence = LocationEvidence.from_delivery(delivery)
         location = provider.resolve(evidence)
-
         if location is None:
             unresolved_rows.append(delivery.row_number)
             continue
-
-        resolved_deliveries.append(
-            replace(
-                delivery,
-                latitude=location.latitude,
-                longitude=location.longitude,
-            )
-        )
-
+        resolved_deliveries.append(replace(delivery, latitude=location.latitude, longitude=location.longitude))
     return resolved_deliveries, tuple(unresolved_rows)
 
 
@@ -196,19 +182,9 @@ def optimize_deliveries_file(
 ) -> OptimizationServiceResult:
     """Run the complete XLSX-to-route application workflow."""
     imported = import_result(path)
+    deliveries, missing_location_rows = _resolve_missing_coordinates(list(imported.deliveries), location_provider)
+    unresolved_rows = tuple(sorted(set(imported.unresolved_rows) | set(missing_location_rows)))
 
-    deliveries, missing_location_rows = _resolve_missing_coordinates(
-        list(imported.deliveries),
-        location_provider,
-    )
-
-    unresolved_rows = tuple(
-        sorted(set(imported.unresolved_rows) | set(missing_location_rows))
-    )
-
-    # A workbook can be valid while every delivery is pending geolocation.
-    # Return an auditable empty route instead of converting a data-quality
-    # limitation into a fatal optimization error.
     if not deliveries:
         empty_route = Route.from_physical_stops([])
         empty_result = OptimizationResult(
@@ -227,15 +203,9 @@ def optimize_deliveries_file(
             route_metrics=RouteMetrics(0.0, 0.0, ()),
         )
 
-    physical_stops = group_physical_stops(deliveries)
-    physical_stops = _resolve_physical_stops(physical_stops, location_provider)
+    physical_stops = _resolve_physical_stops(group_physical_stops(deliveries), location_provider)
     physical_stops_tuple = tuple(physical_stops)
-    full_matrix = build_route_matrix(
-        physical_stops,
-        origin=origin,
-        destination=destination,
-        provider=routing_provider,
-    )
+    full_matrix = build_route_matrix(physical_stops, origin=origin, destination=destination, provider=routing_provider)
     problem = OptimizationProblem.from_full_matrix(
         physical_stops,
         full_matrix,
