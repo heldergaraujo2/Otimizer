@@ -207,6 +207,24 @@ def _resolve_uncached_with_legacy_source(
     self: goiania.GoianiaLocationProvider,
     evidence: LocationEvidence,
 ) -> ResolvedLocation | None:
+    # When quadra+lote and an explicit address field are present but every
+    # municipal cadastral record contradicts that explicit evidence, quarantine
+    # the stop instead of allowing a weaker parcel-only fallback to associate
+    # it with the wrong property. The delivery remains unresolved and therefore
+    # preserved for later/manual geolocation.
+    if (
+        evidence.latitude is None
+        and evidence.longitude is None
+        and evidence.quadra
+        and evidence.lote
+    ):
+        cadastral_features = self._query_cadastral_by_parcel(evidence)
+        if cadastral_features and not any(
+            _cadastral_candidate_matches_explicit_evidence(evidence, feature)
+            for feature in cadastral_features
+        ):
+            return None
+
     resolved = _original_resolve_uncached(self, evidence)
     if resolved is not None:
         if (
