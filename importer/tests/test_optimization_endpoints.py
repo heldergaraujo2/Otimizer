@@ -87,3 +87,48 @@ def test_endpoint_metrics_are_required_for_declared_endpoints():
         assert "Origin metrics" in str(exc)
     else:
         raise AssertionError("Expected origin metrics validation")
+
+
+def test_return_to_start_participates_in_exact_route_selection():
+    stops = tuple(make_stop(index) for index in range(3))
+    matrix = (
+        (TravelMetric(0, 0), TravelMetric(1, 1), TravelMetric(2, 2)),
+        (TravelMetric(50, 50), TravelMetric(0, 0), TravelMetric(1, 1)),
+        (TravelMetric(1, 1), TravelMetric(50, 50), TravelMetric(0, 0)),
+    )
+
+    result = optimize(
+        OptimizationProblem(
+            stops=stops,
+            matrix=matrix,
+            return_to_start=True,
+            objective=OptimizationObjective.TIME,
+        )
+    )
+
+    assert [item.id for item in result.route.stops] == ["stop-0", "stop-1", "stop-2"]
+    assert result.return_to_start is True
+    assert result.route.physical_stop_count == 3
+    assert result.route.delivery_count == 3
+
+
+def test_unreachable_return_leg_keeps_all_stops():
+    stops = tuple(make_stop(index) for index in range(3))
+    matrix = (
+        (TravelMetric(0, 0), TravelMetric(1, 1), TravelMetric(2, 2)),
+        (TravelMetric(1, 1), TravelMetric(0, 0), TravelMetric(1, 1)),
+        (None, None, TravelMetric(0, 0)),
+    )
+
+    result = optimize(
+        OptimizationProblem(
+            stops=stops,
+            matrix=matrix,
+            return_to_start=True,
+        )
+    )
+
+    assert len(result.route.stops) == 3
+    assert {item.id for item in result.route.stops} == {"stop-0", "stop-1", "stop-2"}
+    assert result.return_to_start is True
+    assert result.route.delivery_count == 3
