@@ -4,9 +4,14 @@ from otimizer_importer.location import LocationEvidence
 
 def street_evidence(*, neighborhood="Setor Bueno"):
     return LocationEvidence(
+        latitude=None,
+        longitude=None,
         address="Avenida New York",
         normalized_address="avenida new york",
         number="250",
+        quadra=None,
+        lote=None,
+        zipcode=None,
         neighborhood=neighborhood,
         city="Goiânia",
     )
