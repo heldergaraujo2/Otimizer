@@ -6,7 +6,8 @@
   }
 
   function validCoordinatePair(latitude, longitude) {
-    return validCoordinate(latitude, -90, 90) && validCoordinate(longitude, -180, 180);
+    if (!validCoordinate(latitude, -90, 90) || !validCoordinate(longitude, -180, 180)) return false;
+    return !(Number(latitude) === 0 && Number(longitude) === 0);
   }
 
   function mapCoordinates(stop) {
@@ -74,7 +75,7 @@
       const visitedClass = visited ? " visited" : "";
       return L.divIcon({
         className: "otimizer-stop-marker",
-        html: `<span class="${visitedClass.trim()}">${stop.sequence}</span>`,
+        html: `<span class="${visitedClass.trim()}">${escapeHtml(stop.sequence)}</span>`,
         iconSize: [36, 36],
         iconAnchor: [18, 18]
       });
@@ -146,7 +147,7 @@
         }).addTo(map);
         const state = stopState(stop);
         const label = state === "pending" ? "Localização pendente" : state === "approximate" ? "Localização aproximada" : "Localização disponível";
-        marker.bindPopup(`<strong>Parada ${stop.sequence}</strong><br>${escapeHtml(stop.deliveries?.[0]?.address || "Endereço não informado")}<br><span>${label}</span>`);
+        marker.bindPopup(`<strong>Parada ${escapeHtml(stop.sequence)}</strong><br>${escapeHtml(stop.deliveries?.[0]?.address || "Endereço não informado")}<br><span>${label}</span>`);
         marker.on("click", () => showStop(index));
         markers[index] = marker;
       });
@@ -202,12 +203,17 @@
         const state = stopState(stop);
         const visitedClass = visitedStops.has(index) ? " visited" : "";
         const stateLabel = state === "pending" ? "Localização pendente" : state === "approximate" ? "Localização aproximada" : "Localização disponível";
-        return `<article class="stop${visitedClass} stop-${state}" data-index="${index}" tabindex="0" aria-label="Parada ${stop.sequence}, ${stateLabel}"><div class="stop-number">${stop.sequence}</div><div><h3>${escapeHtml(primary.address || "Endereço não informado")}</h3><p>${escapeHtml(primary.city || "")}</p><p>${stop.delivery_count} entrega(s)</p><p class="location-state location-state-${state}">${stateLabel}</p></div></article>`;
+        return `<article class="stop${visitedClass} stop-${state}" data-index="${index}" tabindex="0" aria-label="Parada ${escapeHtml(stop.sequence)}, ${stateLabel}"><div class="stop-number">${escapeHtml(stop.sequence)}</div><div><h3>${escapeHtml(primary.address || "Endereço não informado")}</h3><p>${escapeHtml(primary.city || "")}</p><p>${escapeHtml(stop.delivery_count)} entrega(s)</p><p class="location-state location-state-${state}">${stateLabel}</p></div></article>`;
       }).join("");
       document.querySelectorAll(".stop").forEach((element) => {
         const index = Number(element.dataset.index);
         element.addEventListener("click", () => showStop(index));
-        element.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") showStop(index); });
+        element.addEventListener("keydown", (event) => {
+          if (event.key === "Enter" || event.key === " ") {
+            event.preventDefault();
+            showStop(index);
+          }
+        });
       });
     };
   }

@@ -6,6 +6,10 @@ const vm = require("node:vm");
 
 const source = fs.readFileSync(path.join(__dirname, "..", "route-safety.js"), "utf8");
 
+function escapeHtml(value) {
+  return String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
+}
+
 function createHarness() {
   const elements = new Map();
   const requests = [];
@@ -21,7 +25,7 @@ function createHarness() {
       requests.push(url);
       return { ok: true, json: async () => ({ routes: [{ geometry: {} }] }) };
     },
-    escapeHtml: (value) => String(value ?? ""),
+    escapeHtml,
     $: (id) => {
       if (!elements.has(id)) {
         elements.set(id, {
@@ -75,6 +79,14 @@ test("identifica parada sem coordenadas como pendente", () => {
   assert.equal(h.ui.navigationUrl(stop), null);
 });
 
+test("rejeita 0,0 como coordenada de mapa", () => {
+  const h = createHarness();
+  const stop = { sequence: 4, latitude: 0, longitude: 0, deliveries: [], location: {} };
+  assert.equal(h.ui.validCoordinatePair(0, 0), false);
+  assert.equal(h.ui.mapCoordinates(stop), null);
+  assert.equal(h.ui.navigationUrl(stop), null);
+});
+
 test("não habilita navegação usando apenas o centro da propriedade", () => {
   const h = createHarness();
   const stop = {
@@ -120,6 +132,23 @@ test("mantém parada pendente na lista e informa seu estado", () => {
   };
   h.renderStops([stop]);
   assert.match(h.elements.get("stops").innerHTML, /Localização pendente/);
+});
+
+test("escapa dados variáveis da parada antes de renderizar HTML", () => {
+  const h = createHarness();
+  const stop = {
+    sequence: '<img src=x onerror="alert(1)">',
+    delivery_count: '<script>alert(1)</script>',
+    latitude: null,
+    longitude: null,
+    deliveries: [{ address: "Rua <A>" }],
+    location: {},
+  };
+  h.renderStops([stop]);
+  const html = h.elements.get("stops").innerHTML;
+  assert.doesNotMatch(html, /<img src=x/);
+  assert.doesNotMatch(html, /<script>/);
+  assert.match(html, /&lt;img src=x onerror=&quot;alert\(1\)&quot;&gt;/);
 });
 
 test("não gera link de navegação para parada pendente no detalhe", () => {
