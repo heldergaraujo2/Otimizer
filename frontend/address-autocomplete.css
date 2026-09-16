@@ -1,0 +1,33 @@
+.address-suggestions {
+  position: absolute;
+  z-index: 2000;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  max-height: 280px;
+  overflow-y: auto;
+  background: #fff;
+  border: 1px solid #cbd5e1;
+  border-radius: 10px;
+  box-shadow: 0 10px 25px rgba(15, 23, 42, 0.15);
+}
+
+.address-suggestion {
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+  padding: 10px 12px;
+  border: 0;
+  border-bottom: 1px solid #e2e8f0;
+  background: #fff;
+  color: #0f172a;
+  text-align: left;
+  cursor: pointer;
+}
+
+.address-suggestion:last-child { border-bottom: 0; }
+.address-suggestion:hover, .address-suggestion:focus { background: #f1f5f9; outline: none; }
+.address-suggestion strong { font-size: 0.95rem; }
+.address-suggestion small { color: #64748b; font-size: 0.8rem; }
