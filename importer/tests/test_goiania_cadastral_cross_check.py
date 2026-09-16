@@ -30,15 +30,29 @@ def cadastral_feature(*, number="123", street="Rua Exemplo", neighborhood="Centr
     return {
         "attributes": {
             "id": "CAD-123",
+            "id_qdr": "QDR-10",
             "nrinscr": "123456789",
             "nrimovel": number,
             "nrquadra": quadra,
             "nrlote": lote,
             "nmbairro": neighborhood,
             "nmlogradou": street,
+            "cdlogradou": 777,
             "ci": "CI-123",
         },
         "geometry": geometry,
+    }
+
+
+def segment_feature(segment_id, *, logradouro=777, street="Rua Exemplo", path=None):
+    return {
+        "attributes": {
+            "id": segment_id,
+            "id_log": str(logradouro),
+            "nm_log": street,
+            "nm": street,
+        },
+        "geometry": {"paths": [path or [[-49.2500, -16.6800], [-49.2490, -16.6800]]]},
     }
 
 
@@ -62,6 +76,8 @@ def test_provider_prefers_cadastral_cross_check_before_gps_only_sources(monkeypa
         return [feature]
 
     monkeypatch.setattr(provider, "_query_cadastral_by_parcel", query_cadastral)
+    monkeypatch.setattr(provider, "_query_lot_segment_ids", lambda block_id, lot: [])
+    monkeypatch.setattr(provider, "_query_street_segments_by_link", lambda **kwargs: [])
     monkeypatch.setattr(provider, "_query_street_segments", lambda latitude, longitude: [])
     monkeypatch.setattr(provider, "_query_official_numbers", lambda current_evidence: calls.__setitem__("official", calls["official"] + 1) or [])
     monkeypatch.setattr(provider, "_query_lots", lambda current_evidence: calls.__setitem__("lots", calls["lots"] + 1) or [])
@@ -84,6 +100,8 @@ def test_provider_uses_cadastral_x_y_when_geometry_is_missing(monkeypatch):
     feature["attributes"]["y_coord"] = -16.6805
 
     monkeypatch.setattr(provider, "_query_cadastral_by_parcel", lambda evidence: [feature])
+    monkeypatch.setattr(provider, "_query_lot_segment_ids", lambda block_id, lot: [])
+    monkeypatch.setattr(provider, "_query_street_segments_by_link", lambda **kwargs: [])
     monkeypatch.setattr(provider, "_query_street_segments", lambda latitude, longitude: [])
 
     resolved = provider.resolve(parcel_evidence())
@@ -106,3 +124,39 @@ def test_provider_does_not_accept_cadastral_candidate_with_wrong_lot(monkeypatch
     resolved = provider.resolve(parcel_evidence())
 
     assert resolved is None
+
+
+def test_nearest_access_prefers_explicit_parcel_segment_over_closer_neighbor(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    property_point = (-49.2505, -16.6805)
+    linked = segment_feature("SEG-LINKED", path=[[-49.2505, -16.6810], [-49.2505, -16.6800]])
+    closer_wrong = segment_feature("SEG-WRONG", path=[[-49.2501, -16.6805], [-49.2491, -16.6805]], street="Outra Rua")
+
+    monkeypatch.setattr(provider, "_query_street_segments_by_link", lambda **kwargs: [linked, closer_wrong])
+    monkeypatch.setattr(provider, "_query_street_segments", lambda latitude, longitude: [])
+
+    access = provider._nearest_street_access(
+        property_point,
+        preferred_segment_ids=["SEG-LINKED"],
+        preferred_logradouro=777,
+        preferred_street_name="Rua Exemplo",
+    )
+
+    assert access is not None
+    assert math.isclose(access[0], -49.2505, abs_tol=1e-9)
+    assert math.isclose(access[1], -16.6805, abs_tol=1e-9)
+
+
+def test_nearest_access_falls_back_to_spatial_segments_when_link_is_unavailable(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    property_point = (-49.2505, -16.6805)
+    spatial = segment_feature("SEG-SPATIAL", path=[[-49.2505, -16.6810], [-49.2505, -16.6800]])
+
+    monkeypatch.setattr(provider, "_query_street_segments_by_link", lambda **kwargs: [])
+    monkeypatch.setattr(provider, "_query_street_segments", lambda latitude, longitude: [spatial])
+
+    access = provider._nearest_street_access(property_point, preferred_segment_ids=["SEG-MISSING"])
+
+    assert access is not None
+    assert math.isclose(access[0], -49.2505, abs_tol=1e-9)
+    assert math.isclose(access[1], -16.6805, abs_tol=1e-9)

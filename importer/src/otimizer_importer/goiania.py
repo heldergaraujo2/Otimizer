@@ -11,7 +11,7 @@ from urllib.request import Request, urlopen
 from .location import LocationDataProvider, LocationEvidence, ResolvedLocation
 
 DEFAULT_FEATURE_BASE_URL = (
-    "https://portalmapa.goiania.go.gov.br/servicogyn/rest/services/"
+    "https://portalmapa.goiania.go.br/servicogyn/rest/services/"
     "MapaServer/Feature_Base/FeatureServer"
 )
 LOT_LAYER_ID = 0
@@ -65,10 +65,20 @@ class GoianiaLocationProvider(LocationDataProvider):
                     cadastral_id = attributes.get("id") or attributes.get("ci") or attributes.get("nrinscr")
                     exact_number = _same_normalized_value(attributes.get("nrimovel"), evidence.number)
                     exact_street = _same_street_name(attributes.get("nmlogradou"), evidence.normalized_address)
-                    access_point = self._nearest_street_access(property_point)
+                    lot_segment_ids = self._query_lot_segment_ids(
+                        attributes.get("id_qdr"),
+                        attributes.get("nrlote") or evidence.lote,
+                    )
+                    preferred_segment_ids = lot_segment_ids or _nonempty_values(attributes.get("id_seg"))
+                    access_point = self._nearest_street_access(
+                        property_point,
+                        preferred_segment_ids=preferred_segment_ids,
+                        preferred_logradouro=attributes.get("cdlogradou"),
+                        preferred_street_name=attributes.get("nmlogradou"),
+                    )
                     if access_point is not None:
-                        confidence = 0.97 if exact_number and exact_street else 0.95 if exact_number else 0.92
-                        source = "goiania-cadastral-crosscheck-road-access"
+                        confidence = 0.98 if exact_number and exact_street else 0.96 if exact_number else 0.93
+                        source = "goiania-cadastral-crosscheck-linked-road-access"
                         return _resolved_with_access(
                             property_point,
                             access_point,
@@ -97,12 +107,15 @@ class GoianiaLocationProvider(LocationDataProvider):
 
             attributes = best.get("attributes") or {}
             cadastral_id = attributes.get("id")
-            access_point = self._nearest_street_access(property_point)
+            access_point = self._nearest_street_access(
+                property_point,
+                preferred_segment_ids=_nonempty_values(attributes.get("id_seg")),
+            )
             if access_point is not None:
                 return _resolved_with_access(
                     property_point,
                     access_point,
-                    confidence=0.88,
+                    confidence=0.89,
                     source="goiania-cadastral-lot-road-access",
                     cadastral_id=cadastral_id,
                 )
@@ -122,7 +135,10 @@ class GoianiaLocationProvider(LocationDataProvider):
                 if property_point is not None:
                     attributes = best_number.get("attributes") or {}
                     cadastral_id = attributes.get("id")
-                    access_point = self._nearest_street_access(property_point)
+                    access_point = self._nearest_street_access(
+                        property_point,
+                        preferred_logradouro=attributes.get("cd_log"),
+                    )
                     if access_point is not None:
                         return _resolved_with_access(
                             property_point,
@@ -149,7 +165,10 @@ class GoianiaLocationProvider(LocationDataProvider):
 
         attributes = best.get("attributes") or {}
         cadastral_id = attributes.get("id")
-        access_point = self._nearest_street_access(property_point)
+        access_point = self._nearest_street_access(
+            property_point,
+            preferred_segment_ids=_nonempty_values(attributes.get("id_seg")),
+        )
         if access_point is not None:
             return _resolved_with_access(
                 property_point,
@@ -223,6 +242,23 @@ class GoianiaLocationProvider(LocationDataProvider):
             where,
             "id,id_qdr,nrinscr,cdlogradou,nmlogradou,nrimovel,nrquadra,nrlote,nmbairro,ci,x_coord,y_coord",
         )
+
+    def _query_lot_segment_ids(self, block_id: object, lot: object) -> list[str]:
+        """Read the parcel's explicit municipal segment link before using proximity."""
+        if block_id is None or lot is None:
+            return []
+        features = self._query_layer_where(
+            LOT_LAYER_ID,
+            (
+                f"id_qdr = '{_escape_where_value(block_id)}' "
+                f"AND nm_lot = '{_escape_where_value(lot)}'"
+            ),
+            "id,id_seg,nm_lot",
+        )
+        result: list[str] = []
+        for feature in features:
+            result.extend(_nonempty_values((feature.get("attributes") or {}).get("id_seg")))
+        return list(dict.fromkeys(result))
 
     def _query_lot_by_parcel(self, evidence: LocationEvidence) -> list[dict]:
         """Find cadastral lots from neighborhood + block + lot evidence."""
@@ -306,20 +342,70 @@ class GoianiaLocationProvider(LocationDataProvider):
         )
 
     def _query_street_segments(self, latitude: float, longitude: float) -> list[dict]:
-        return self._query_layer_at_point(latitude, longitude, STREET_SEGMENT_LAYER_ID, "id_seg,cd_log,cd_rua")
+        return self._query_layer_at_point(
+            latitude,
+            longitude,
+            STREET_SEGMENT_LAYER_ID,
+            "id,id_log,id_bai,nm_log,nm,x_coord,y_coord",
+        )
 
-    def _nearest_street_access(self, property_point: tuple[float, float]) -> tuple[float, float] | None:
-        """Find the nearest street candidate around the resolved property point."""
+    def _query_street_segments_by_link(
+        self,
+        *,
+        segment_ids: list[str],
+        logradouro: object,
+    ) -> list[dict]:
+        """Query segments by cadastral identifiers, keeping spatial fallback separate."""
+        clauses: list[str] = []
+        if segment_ids:
+            quoted = ",".join(f"'{_escape_where_value(value)}'" for value in segment_ids)
+            clauses.append(f"id IN ({quoted})")
+        if logradouro is not None:
+            normalized = _normalize_number(logradouro)
+            if normalized:
+                clauses.append(f"id_log = '{_escape_where_value(logradouro)}'")
+        if not clauses:
+            return []
+        return self._query_layer_where(
+            STREET_SEGMENT_LAYER_ID,
+            " OR ".join(clauses),
+            "id,id_log,id_bai,nm_log,nm,x_coord,y_coord",
+        )
+
+    def _nearest_street_access(
+        self,
+        property_point: tuple[float, float],
+        *,
+        preferred_segment_ids: list[str] | None = None,
+        preferred_logradouro: object = None,
+        preferred_street_name: object = None,
+    ) -> tuple[float, float] | None:
+        """Prefer the parcel-linked road; only then fall back to nearest geometry."""
         longitude, latitude = property_point
-        segments = self._query_street_segments(latitude, longitude)
-        best: tuple[float, tuple[float, float]] | None = None
+        preferred_segment_ids = preferred_segment_ids or []
+        linked_segments = self._query_street_segments_by_link(
+            segment_ids=preferred_segment_ids,
+            logradouro=preferred_logradouro,
+        )
+        segments = linked_segments or self._query_street_segments(latitude, longitude)
+        best: tuple[tuple[int, float], tuple[float, float]] | None = None
         for feature in segments:
+            attributes = feature.get("attributes") or {}
+            segment_id = _normalize_number(attributes.get("id"))
+            linked = bool(segment_id and segment_id in {_normalize_number(value) for value in preferred_segment_ids})
+            same_logradouro = (
+                preferred_logradouro is not None
+                and _normalize_number(attributes.get("id_log")) == _normalize_number(preferred_logradouro)
+            )
+            same_name = _same_street_name(attributes.get("nm_log") or attributes.get("nm"), preferred_street_name)
+            priority = 3 if linked else 2 if same_logradouro else 1 if same_name else 0
             for path in (feature.get("geometry") or {}).get("paths") or []:
                 for start, end in zip(path, path[1:]):
                     candidate = _nearest_point_on_segment(property_point, start, end)
                     distance = (candidate[0] - property_point[0]) ** 2 + (candidate[1] - property_point[1]) ** 2
-                    if best is None or distance < best[0]:
-                        best = (distance, candidate)
+                    key = (priority, -distance)
+                    if best is None or key > best[0]:
+                        best = (key, candidate)
         return best[1] if best is not None else None
 
     def _query_layer_at_point(self, latitude: float, longitude: float, layer_id: int, out_fields: str) -> list[dict]:
@@ -348,6 +434,16 @@ class GoianiaLocationProvider(LocationDataProvider):
 
 def _escape_where_value(value: object) -> str:
     return str(value).replace("'", "''")
+
+
+def _nonempty_values(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, (list, tuple, set)):
+        values = value
+    else:
+        values = [value]
+    return [str(item).strip() for item in values if str(item).strip()]
 
 
 def _resolution_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
@@ -449,7 +545,6 @@ def _cadastral_coordinate_point(attributes: dict) -> tuple[float, float] | None:
     x = attributes.get("x_coord")
     y = attributes.get("y_coord")
     if isinstance(x, (int, float)) and isinstance(y, (int, float)):
-        # Cadastro coordinates are longitude/latitude in the requested 4326 output.
         if -180 <= float(x) <= 180 and -90 <= float(y) <= 90:
             return float(x), float(y)
     return None
