@@ -97,7 +97,7 @@ def _resolve_on_municipal_street(
         where = f"(nm_log LIKE '%{escaped}%' OR nm LIKE '%{escaped}%')"
         if neighborhood:
             escaped_neighborhood = goiania._escape_where_value(neighborhood)
-            with_neighborhood = f"{where} AND nm_bai LIKE '%{escaped_neighborhood}% '".replace("% '" , "'%")
+            with_neighborhood = f"{where} AND nm_bai LIKE '%{escaped_neighborhood}%'"
             features = self._query_layer_where(
                 10,
                 with_neighborhood,
@@ -170,4 +170,5 @@ def _resolve_uncached_with_legacy_source(
 
 if not getattr(goiania.GoianiaLocationProvider._resolve_uncached, "_otimizer_legacy_source_patch", False):
     _resolve_uncached_with_legacy_source._otimizer_legacy_source_patch = True
+    goiania.GoanialocationProvider = goiania.GoianiaLocationProvider
     goiania.GoianiaLocationProvider._resolve_uncached = _resolve_uncached_with_legacy_source
