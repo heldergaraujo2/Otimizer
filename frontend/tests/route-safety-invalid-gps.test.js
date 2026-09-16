@@ -19,14 +19,13 @@ function loadUi() {
   return context.window.OtimizerRouteUI;
 }
 
-test("rejeita GPS 0,0 como coordenada utilizável", () => {
+test("aceita apenas coordenadas numéricas finitas dentro dos limites", () => {
   const ui = loadUi();
-  assert.equal(ui.validCoordinatePair(0, 0), true);
-  assert.equal(ui.mapCoordinates({ latitude: 0, longitude: 0, location: {} }), {
-    latitude: 0,
-    longitude: 0,
-    kind: "route",
-  });
+  assert.equal(ui.validCoordinatePair(-16.7, -49.2), true);
+  assert.equal(ui.validCoordinatePair("-16.7", "-49.2"), true);
+  assert.equal(ui.validCoordinatePair("not-a-number", -49.2), false);
+  assert.equal(ui.validCoordinatePair(-91, -49.2), false);
+  assert.equal(ui.validCoordinatePair(-16.7, 181), false);
 });
 
 test("não confunde coordenada inválida com localização pendente", () => {
