@@ -1,3 +1,5 @@
+import math
+
 from otimizer_importer.goiania import (
     GoianiaLocationProvider,
     _best_matching_cadastral_record,
@@ -21,6 +23,10 @@ def parcel_evidence(*, latitude=-16.68, longitude=-49.25, number="123"):
 
 
 def cadastral_feature(*, number="123", street="Rua Exemplo", neighborhood="Centro", quadra="10", lote="5", geometry=None):
+    if geometry is None:
+        geometry = {
+            "rings": [[[-49.251, -16.681], [-49.250, -16.681], [-49.250, -16.680], [-49.251, -16.680], [-49.251, -16.681]]]
+        }
     return {
         "attributes": {
             "id": "CAD-123",
@@ -32,9 +38,7 @@ def cadastral_feature(*, number="123", street="Rua Exemplo", neighborhood="Centr
             "nmlogradou": street,
             "ci": "CI-123",
         },
-        "geometry": geometry or {
-            "rings": [[[-49.251, -16.681], [-49.250, -16.681], [-49.250, -16.680], [-49.251, -16.680], [-49.251, -16.681]]]
-        },
+        "geometry": geometry,
     }
 
 
@@ -67,8 +71,8 @@ def test_provider_prefers_cadastral_cross_check_before_gps_only_sources(monkeypa
     assert resolved is not None
     assert resolved.source == "goiania-cadastral-crosscheck"
     assert resolved.cadastral_id == "CAD-123"
-    assert resolved.property_latitude == -16.6805
-    assert resolved.property_longitude == -49.2505
+    assert math.isclose(resolved.property_latitude, -16.6805, abs_tol=1e-9)
+    assert math.isclose(resolved.property_longitude, -49.2505, abs_tol=1e-9)
     assert resolved.confidence == 0.93
     assert calls == {"cadastral": 1, "official": 0, "lots": 0}
 
