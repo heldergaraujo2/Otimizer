@@ -1,5 +1,6 @@
 from .address_parser import ParsedAddress, normalize_address, parse_address
 from .goiania import GoianiaLocationProvider
+from . import cadastral_runtime_patch as _cadastral_runtime_patch
 from .location import LocationDataProvider, LocationEvidence, ResolvedLocation, gps_fallback
 from .metrics import RouteLeg, RouteMetrics, calculate_route_metrics
 from .models import Delivery, ImportResult, OptimizedRouteStop, PhysicalStop, Route
