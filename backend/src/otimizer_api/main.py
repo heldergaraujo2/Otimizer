@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 import tempfile
 from datetime import datetime, timezone
@@ -56,6 +57,39 @@ def _endpoint(latitude: float | None, longitude: float | None, name: str) -> Rou
     if latitude is None or longitude is None:
         raise HTTPException(status_code=422, detail=f"{name} requires both latitude and longitude")
     return RouteEndpoint(latitude, longitude, name)
+
+
+def _parse_manual_locations(raw: str | None) -> dict[str, tuple[float, float]]:
+    """Validate driver-confirmed map points before they reach the optimizer."""
+    if raw is None or not raw.strip():
+        return {}
+    try:
+        payload = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise HTTPException(status_code=422, detail="manual_locations must be valid JSON") from exc
+    if not isinstance(payload, list):
+        raise HTTPException(status_code=422, detail="manual_locations must be a JSON list")
+
+    result: dict[str, tuple[float, float]] = {}
+    for item in payload:
+        if not isinstance(item, dict):
+            raise HTTPException(status_code=422, detail="Each manual location must be an object")
+        stop_id = str(item.get("stop_id") or "").strip()
+        if not stop_id:
+            raise HTTPException(status_code=422, detail="Each manual location requires stop_id")
+        try:
+            latitude = float(item["latitude"])
+            longitude = float(item["longitude"])
+        except (KeyError, TypeError, ValueError) as exc:
+            raise HTTPException(status_code=422, detail=f"Manual location for {stop_id} requires latitude and longitude") from exc
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise HTTPException(status_code=422, detail=f"Manual location for {stop_id} has invalid coordinates")
+        if latitude == 0 and longitude == 0:
+            raise HTTPException(status_code=422, detail=f"Manual location for {stop_id} cannot be 0,0")
+        if stop_id in result:
+            raise HTTPException(status_code=422, detail=f"Duplicate manual location for {stop_id}")
+        result[stop_id] = (latitude, longitude)
+    return result
 
 
 def _serialize_charge(charge) -> dict:
@@ -260,6 +294,7 @@ def create_app(
         destination_latitude: Annotated[float | None, Form()] = None,
         destination_longitude: Annotated[float | None, Form()] = None,
         return_to_start: Annotated[bool, Form()] = False,
+        manual_locations: Annotated[str | None, Form()] = None,
         authorization: Annotated[str | None, Header()] = None,
         account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None,
     ) -> dict:
@@ -282,6 +317,7 @@ def create_app(
         destination = _endpoint(destination_latitude, destination_longitude, "destination")
         if destination is not None and return_to_start:
             raise HTTPException(status_code=422, detail="destination and return_to_start cannot be combined")
+        parsed_manual_locations = _parse_manual_locations(manual_locations)
 
         max_bytes = _max_upload_bytes()
         contents = await file.read(max_bytes + 1)
@@ -296,6 +332,7 @@ def create_app(
                 str(temporary_path), routing_provider=routing_provider,
                 location_provider=location_provider, origin=origin,
                 destination=destination, return_to_start=return_to_start, objective=objective,
+                manual_locations=parsed_manual_locations,
             )
         except RoutingError as exc:
             raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc

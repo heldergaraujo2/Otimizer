@@ -12,6 +12,12 @@
 
   function mapCoordinates(stop) {
     const location = stop?.location || {};
+    if (location.source === "manual" && validCoordinatePair(location.access_latitude, location.access_longitude)) {
+      return { latitude: Number(location.access_latitude), longitude: Number(location.access_longitude), kind: "manual" };
+    }
+    if (!location.source && validCoordinatePair(stop?.latitude, stop?.longitude)) {
+      return { latitude: Number(stop.latitude), longitude: Number(stop.longitude), kind: "route" };
+    }
     if (location.source && validCoordinatePair(location.access_latitude, location.access_longitude)) {
       return { latitude: Number(location.access_latitude), longitude: Number(location.access_longitude), kind: "access" };
     }
@@ -51,6 +57,9 @@
     const location = stop?.location || {};
     const confidence = Number(location.confidence);
     const percentage = Number.isFinite(confidence) ? ` · confiança ${Math.round(confidence * 100)}%` : "";
+    if (location.source === "manual" && validCoordinatePair(location.access_latitude, location.access_longitude)) {
+      return "Localização marcada manualmente pelo motorista";
+    }
     if (!location.source && validCoordinatePair(stop?.latitude, stop?.longitude)) {
       return "Localização: GPS da planilha";
     }
@@ -71,6 +80,60 @@
   }
 
   function installUi() {
+    let manualPlacementIndex = -1;
+    let manualPlacementMarker = null;
+
+    function cancelManualPlacement() {
+      if (map && manualPlacementHandler) map.off("click", manualPlacementHandler);
+      manualPlacementIndex = -1;
+      if (manualPlacementMarker) {
+        manualPlacementMarker.remove();
+        manualPlacementMarker = null;
+      }
+      setStatus("Seleção manual cancelada");
+    }
+
+    function manualPlacementHandler(event) {
+      if (manualPlacementIndex < 0 || !map) return;
+      const index = manualPlacementIndex;
+      const stop = currentRoute[index];
+      if (!stop || !validCoordinatePair(event.latlng.lat, event.latlng.lng)) return;
+
+      if (manualPlacementMarker) manualPlacementMarker.remove();
+      manualPlacementMarker = L.marker([event.latlng.lat, event.latlng.lng]).addTo(map);
+      const confirmed = global.confirm(
+        `Confirmar localização da parada ${stop.sequence} neste ponto? A rota inteira será recalculada.`
+      );
+      if (!confirmed) return;
+
+      if (map) map.off("click", manualPlacementHandler);
+      manualPlacementIndex = -1;
+      if (manualPlacementMarker) {
+        manualPlacementMarker.remove();
+        manualPlacementMarker = null;
+      }
+      if (typeof global.otimizerManualLocationSelected === "function") {
+        global.otimizerManualLocationSelected(stop.id, event.latlng.lat, event.latlng.lng);
+      }
+    }
+
+    global.otimizerStartManualPlacement = function (index) {
+      const stop = currentRoute[index];
+      if (!stop || !map || typeof L === "undefined") {
+        setStatus("O mapa precisa estar disponível para marcar a localização", "error");
+        return;
+      }
+      if (manualPlacementIndex >= 0) cancelManualPlacement();
+      manualPlacementIndex = index;
+      map.on("click", manualPlacementHandler);
+      setStatus(`Marque no mapa o ponto exato da parada ${stop.sequence}`, "loading");
+      $("detail-content").insertAdjacentHTML(
+        "beforeend",
+        `<p class="manual-placement-hint">Clique no ponto exato da parada no mapa. Depois confirme.</p><button id="cancel-manual-location" class="secondary" type="button">Cancelar marcação</button>`
+      );
+      $("cancel-manual-location").addEventListener("click", cancelManualPlacement, { once: true });
+    };
+
     stopIcon = function (stop, visited = false) {
       const visitedClass = visited ? " visited" : "";
       return L.divIcon({
@@ -180,6 +243,9 @@
       const action = targetUrl
         ? `<a class="navigation-button" href="${targetUrl}" target="_blank" rel="noopener">Navegar até esta parada</a>`
         : `<button class="navigation-button navigation-disabled" type="button" disabled>Localização de navegação pendente</button>`;
+      const manualAction = state !== "located"
+        ? `<button class="navigation-button manual-location-button" type="button" onclick="otimizerStartManualPlacement(${index})">Marcar localização no mapa</button>`
+        : "";
       $("detail-title").textContent = `Parada ${stop.sequence}`;
       $("detail-content").innerHTML = `
         <div class="detail-address"><strong>${escapeHtml(deliveries[0]?.address || "Endereço não informado")}</strong><br>${escapeHtml(deliveries[0]?.neighborhood || "")} ${escapeHtml(deliveries[0]?.city || "")}</div>
@@ -187,6 +253,7 @@
         <p>${escapeHtml(locationSummary(stop))}</p>
         <p class="location-state location-state-${state}">${state === "pending" ? "Esta entrega permanece na rota, mas ainda não possui um ponto geográfico utilizável." : state === "approximate" ? "A propriedade foi localizada, mas o acesso exato ainda não foi determinado." : "Ponto geográfico disponível para esta parada."}</p>
         ${deliveries.map(delivery => `<article class="delivery-card"><strong>${escapeHtml(delivery.tracking_number || "Rastreio não informado")}</strong><span>${escapeHtml(delivery.address || "Endereço não informado")}</span></article>`).join("")}
+        ${manualAction}
         ${action}
       `;
       $("stop-detail").hidden = false;
