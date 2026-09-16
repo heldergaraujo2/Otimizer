@@ -67,27 +67,31 @@ A posição automática é um ponto da geometria da rua, não uma alegação de 
 
 ## Implementação relevante recente
 
-Commit mais recente:
+O estado atual da branch `main` inclui, além da implementação municipal e de recuperação de pendências, os seguintes ajustes de auditoria:
 
-`c5adf0a4e709512e36acd9dd093fdae5098ef4d0` — `fix: show municipal street pin on manual stop`
+- `94a6ae200cf7452171c1460f0ee77ac2ffb7492a` — alinhamento do teste frontend com o contrato atual de coordenadas opcionais;
+- `a5bc93e78a26d72605acef3f3996a13c72123971` — alinhamento do fixture de evidência municipal com o modelo atual;
+- `78edea8704ecfd7d96a094cfcb985c8babd09dff` — teste do fallback municipal validando que o ponto pertence à geometria da rua, sem exigir um vértice/midpoint específico.
 
-Ele consolidou o uso do ponto municipal da rua no fluxo de parada manual e melhorou a indicação visual da origem do ponto.
+Esses ajustes são de teste/contrato e não removem nem alteram as funcionalidades já validadas no PC.
 
-Também existem os commits recentes relacionados:
+## Auditoria automatizada atual
 
-- `b064bc518a6f10e35e3c6da5a5946e161dd14f8f` — testes do fallback municipal de rua;
-- `d1aaee8ce24463743b903282103ff7242fb205a5` — finalização do hook do fallback municipal;
-- `d0f30944048ffb0d9c108440a6379e6af68a8f11` — resolução de endereços manuais por pontos municipais;
-- `97c79127b3f7e38567a78e16515c8c16ed45603f` — autocomplete municipal real por rua/bairro.
+No commit `78edea8704ecfd7d96a094cfcb985c8babd09dff`, os workflows do GitHub Actions confirmaram:
+
+- Importer: **128 passed**;
+- Backend: **71 passed, 2 warnings**;
+- Frontend: **sucesso**, incluindo validação de sintaxe e execução de todos os testes frontend.
+
+Uma falha anterior do Importer foi reproduzida no CI e investigada antes da correção: os testes do fallback municipal estavam desatualizados em relação ao construtor atual de `LocationEvidence` e depois em relação ao contrato real de ponto sobre a geometria da rua. Não houve evidência de falha do fluxo de produção; os testes foram corrigidos para representar o contrato efetivo.
+
+Warnings atuais conhecidos do backend vêm da compatibilidade `starlette.testclient`/`httpx` e do alias `anyio` usado pela dependência. Não foram alterados sem necessidade de correção estrutural comprovada.
 
 ## Testes automatizados conhecidos
 
-Antes das últimas alterações, o ambiente local tinha:
+Os números históricos `123 passed` / `63 passed` não devem mais ser usados como estado atual. O último CI validado é o descrito acima.
 
-- `python -m pytest importer/tests -q` → `123 passed`;
-- `python -m pytest backend/tests -q` → `63 passed, 1 warning`.
-
-Os testes devem ser executados novamente após qualquer alteração estrutural.
+Os testes devem continuar sendo executados novamente após qualquer alteração estrutural.
 
 ## Ambiente local conhecido
 
@@ -125,7 +129,7 @@ A validação funcional básica e o teste real de mais de 30 XLSX já foram conc
 Prioridades:
 
 1. verificar o estado atual completo do Git e consistência entre código/documentação;
-2. executar novamente todas as suítes automatizadas;
+2. manter todas as suítes automatizadas verdes;
 3. auditar regressões em importer, backend, routing, optimization e frontend;
 4. auditar tratamento de dados incompletos/conflitantes;
 5. auditar pernas não roteáveis sem permitir falha da rota inteira;
