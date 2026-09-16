@@ -66,6 +66,26 @@ def test_best_cadastral_record_cross_checks_number_street_and_parcel():
     assert resolved == exact
 
 
+def test_best_cadastral_record_rejects_ambiguous_equal_matches():
+    evidence = parcel_evidence(number=None)
+    first = cadastral_feature(number=None)
+    second = cadastral_feature(number=None)
+    second["attributes"]["id"] = "CAD-456"
+
+    resolved = _best_matching_cadastral_record(evidence, [first, second])
+
+    assert resolved is None
+
+
+def test_best_cadastral_record_rejects_explicit_number_conflict_even_when_parcel_matches():
+    evidence = parcel_evidence(number="123")
+    conflicting = cadastral_feature(number="125")
+
+    resolved = _best_matching_cadastral_record(evidence, [conflicting])
+
+    assert resolved is None
+
+
 def test_provider_prefers_cadastral_cross_check_before_gps_only_sources(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     feature = cadastral_feature(number="123")
