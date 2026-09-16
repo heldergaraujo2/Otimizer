@@ -20,20 +20,20 @@ def parcel_evidence(*, latitude=-16.68, longitude=-49.25, number="123"):
     )
 
 
-def cadastral_feature(*, number="123", street="Rua Exemplo", neighborhood="Centro", geometry=None):
+def cadastral_feature(*, number="123", street="Rua Exemplo", neighborhood="Centro", quadra="10", lote="5", geometry=None):
     return {
         "attributes": {
             "id": "CAD-123",
             "nrinscr": "123456789",
             "nrimovel": number,
-            "nrquadra": "10",
-            "nrlote": "5",
+            "nrquadra": quadra,
+            "nrlote": lote,
             "nmbairro": neighborhood,
             "nmlogradou": street,
             "ci": "CI-123",
         },
         "geometry": geometry or {
-            "rings": [[[ -49.251, -16.681], [-49.250, -16.681], [-49.250, -16.680], [-49.251, -16.680], [-49.251, -16.681]]]
+            "rings": [[[-49.251, -16.681], [-49.250, -16.681], [-49.250, -16.680], [-49.251, -16.680], [-49.251, -16.681]]]
         },
     }
 
@@ -89,9 +89,9 @@ def test_provider_uses_cadastral_x_y_when_geometry_is_missing(monkeypatch):
     assert resolved.latitude == -16.6805
 
 
-def test_provider_does_not_accept_cadastral_candidate_without_minimum_cross_check(monkeypatch):
+def test_provider_does_not_accept_cadastral_candidate_with_wrong_lot(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
-    weak = cadastral_feature(number="999", street="Outra Rua", neighborhood="Outro Bairro")
+    weak = cadastral_feature(number="999", street="Outra Rua", neighborhood="Outro Bairro", lote="6")
 
     monkeypatch.setattr(provider, "_query_cadastral_by_parcel", lambda evidence: [weak])
     monkeypatch.setattr(provider, "_query_lot_by_parcel", lambda evidence: [])
