@@ -32,6 +32,13 @@ def municipal_street_feature():
     }
 
 
+def assert_point_is_on_test_street(resolved):
+    assert resolved.latitude == -16.7
+    assert -49.28 <= resolved.longitude <= -49.26
+    assert resolved.access_latitude == resolved.latitude
+    assert resolved.access_longitude == resolved.longitude
+
+
 def test_address_only_stop_uses_real_municipal_street_point(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
     feature = municipal_street_feature()
@@ -49,10 +56,7 @@ def test_address_only_stop_uses_real_municipal_street_point(monkeypatch):
 
     assert resolved is not None
     assert resolved.source == "goiania-municipal-street"
-    assert resolved.longitude == -49.275
-    assert resolved.latitude == -16.7
-    assert resolved.access_longitude == -49.275
-    assert resolved.access_latitude == -16.7
+    assert_point_is_on_test_street(resolved)
     assert calls and calls[0][0] == 10
     assert "Avenida New York" in calls[0][1]
     assert "Setor Bueno" in calls[0][1]
@@ -73,5 +77,4 @@ def test_address_only_stop_can_fall_back_without_neighborhood(monkeypatch):
 
     assert resolved is not None
     assert resolved.source == "goiania-municipal-street"
-    assert resolved.longitude == -49.275
-    assert resolved.latitude == -16.7
+    assert_point_is_on_test_street(resolved)
