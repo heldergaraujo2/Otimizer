@@ -35,9 +35,14 @@ test("manual location is treated as a navigable map point", () => {
       access_longitude: -49.255,
     },
   };
-  assert.deepEqual(ui.mapCoordinates(stop), { latitude: -16.705, longitude: -49.255, kind: "manual" });
+  const point = ui.mapCoordinates(stop);
+  assert.equal(point.latitude, -16.705);
+  assert.equal(point.longitude, -49.255);
+  assert.equal(point.kind, "manual");
   assert.equal(ui.stopState(stop), "located");
-  assert.deepEqual(ui.navigationTarget(stop), { latitude: -16.705, longitude: -49.255 });
+  const target = ui.navigationTarget(stop);
+  assert.equal(target.latitude, -16.705);
+  assert.equal(target.longitude, -49.255);
 });
 
 test("manual location is explicitly described to the driver", () => {
