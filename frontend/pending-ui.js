@@ -19,6 +19,7 @@
     const pendingIndexes = route.map((stop, index) => ({ stop, index })).filter(({ stop }) => isPending(stop)).map(({ index }) => index);
     const orderedIndexes = [...pendingIndexes, ...route.map((_, index) => index).filter((index) => !pendingIndexes.includes(index))];
 
+    $("pending").textContent = `${pendingIndexes.length} pendência(s)`;
     orderedIndexes.forEach((index) => {
       const item = byIndex.get(index);
       if (!item) return;
@@ -29,10 +30,11 @@
         : item.getAttribute("aria-label") || `Parada ${route[index].sequence}`);
       container.appendChild(item);
     });
+    refreshPendingAlert(pendingIndexes.length);
   };
 
-  function refreshPendingAlert() {
-    const pending = Number($("pending")?.textContent?.match(/\d+/)?.[0] || 0);
+  function refreshPendingAlert(count) {
+    const pending = Number.isFinite(count) ? count : Number($("pending")?.textContent?.match(/\d+/)?.[0] || 0);
     const alert = $("pending-alert");
     if (!alert) return;
     if (pending > 0) {
@@ -46,7 +48,7 @@
 
   const pending = $("pending");
   if (pending) {
-    new MutationObserver(refreshPendingAlert).observe(pending, { childList: true, characterData: true, subtree: true });
+    new MutationObserver(() => refreshPendingAlert()).observe(pending, { childList: true, characterData: true, subtree: true });
     refreshPendingAlert();
   }
 })(window);
