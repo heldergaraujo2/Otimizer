@@ -71,6 +71,44 @@ def _location_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
     return (evidence.latitude, evidence.longitude, evidence.normalized_address, evidence.number, evidence.quadra, evidence.lote, evidence.zipcode, evidence.neighborhood, evidence.city)
 
 
+def _location_evidence_variants(evidence: LocationEvidence) -> tuple[LocationEvidence, ...]:
+    """Return safe parcel variants when provider matching is sensitive to naming."""
+    variants = [evidence]
+    neighborhood = (evidence.neighborhood or "").strip()
+    if neighborhood:
+        stripped = neighborhood
+        while True:
+            candidate = stripped.split(" ", 1)[1] if " " in stripped else stripped
+            if candidate.casefold() == stripped.casefold():
+                break
+            prefix = stripped.split(" ", 1)[0].casefold()
+            if prefix not in {"setor", "s"}:
+                break
+            stripped = candidate.strip()
+            if stripped and stripped.casefold() != neighborhood.casefold():
+                variants.append(replace(evidence, neighborhood=stripped))
+            break
+        variants.append(replace(evidence, neighborhood=None))
+    unique: list[LocationEvidence] = []
+    seen: set[tuple[object, ...]] = set()
+    for item in variants:
+        key = _location_cache_key(item)
+        if key not in seen:
+            seen.add(key)
+            unique.append(item)
+    return tuple(unique)
+
+
+def _resolve_location(provider: LocationDataProvider | None, evidence: LocationEvidence) -> object | None:
+    if provider is None:
+        return None
+    for variant in _location_evidence_variants(evidence):
+        location = provider.resolve(variant)
+        if location is not None:
+            return location
+    return None
+
+
 def _resolve_physical_stops(physical_stops: list[PhysicalStop], provider: LocationDataProvider | None) -> list[PhysicalStop]:
     if provider is None:
         return physical_stops
@@ -82,7 +120,7 @@ def _resolve_physical_stops(physical_stops: list[PhysicalStop], provider: Locati
             evidence = LocationEvidence.from_delivery(delivery)
             key = _location_cache_key(evidence)
             if key not in cache:
-                cache[key] = provider.resolve(evidence)
+                cache[key] = _resolve_location(provider, evidence)
             location = cache[key]
             if location is not None:
                 candidates.append(location)
@@ -102,13 +140,39 @@ def _resolve_missing_coordinates(deliveries: list[Delivery], provider: LocationD
         if delivery.latitude is not None and delivery.longitude is not None:
             resolved_deliveries.append(delivery)
             continue
-        location = provider.resolve(LocationEvidence.from_delivery(delivery)) if provider is not None else None
+        location = _resolve_location(provider, LocationEvidence.from_delivery(delivery))
         if location is None:
             resolved_deliveries.append(delivery)
             unresolved_rows.append(delivery.row_number)
         else:
             resolved_deliveries.append(replace(delivery, latitude=location.latitude, longitude=location.longitude))
     return resolved_deliveries, tuple(unresolved_rows)
+
+
+def _apply_manual_location_overrides(stops: list[PhysicalStop], manual_locations: dict[str, tuple[float, float]] | None) -> list[PhysicalStop]:
+    """Apply driver-confirmed map points without changing original delivery evidence."""
+    if not manual_locations:
+        return stops
+    result: list[PhysicalStop] = []
+    for stop in stops:
+        point = manual_locations.get(stop.id)
+        if point is None:
+            result.append(stop)
+            continue
+        latitude, longitude = point
+        result.append(replace(
+            stop,
+            latitude=latitude,
+            longitude=longitude,
+            location_confidence=1.0,
+            location_source="manual",
+            property_latitude=None,
+            property_longitude=None,
+            access_latitude=latitude,
+            access_longitude=longitude,
+            cadastral_id=stop.cadastral_id,
+        ))
+    return result
 
 
 def _build_route_matrix_with_pending(stops: list[PhysicalStop], *, origin: RouteEndpoint | None, destination: RouteEndpoint | None, provider: RoutingProvider | None) -> tuple[tuple[object | None, ...], ...]:
@@ -149,24 +213,33 @@ def _build_route_matrix_with_pending(stops: list[PhysicalStop], *, origin: Route
     return tuple(full_matrix)
 
 
-def optimize_deliveries_file(path: str, *, routing_provider: RoutingProvider | None = None, location_provider: LocationDataProvider | None = None, origin: RouteEndpoint | None = None, destination: RouteEndpoint | None = None, start_index: int = 0, return_to_start: bool = False, objective: OptimizationObjective = OptimizationObjective.TIME) -> OptimizationServiceResult:
+def optimize_deliveries_file(path: str, *, routing_provider: RoutingProvider | None = None, location_provider: LocationDataProvider | None = None, origin: RouteEndpoint | None = None, destination: RouteEndpoint | None = None, start_index: int = 0, return_to_start: bool = False, objective: OptimizationObjective = OptimizationObjective.TIME, manual_locations: dict[str, tuple[float, float]] | None = None) -> OptimizationServiceResult:
     imported = import_result(path)
     deliveries, missing_location_rows = _resolve_missing_coordinates(list(imported.deliveries), location_provider)
-    unresolved_rows = tuple(sorted(set(imported.unresolved_rows) | set(missing_location_rows)))
+    unresolved_rows = set(imported.unresolved_rows) | set(missing_location_rows)
 
     if not deliveries:
         empty_route = Route.from_physical_stops([])
         empty_result = OptimizationResult(route=empty_route, objective=objective, start_index=None, return_to_start=False, origin=None, destination=None)
-        return OptimizationServiceResult(eligible_delivery_count=0, unresolved_rows=unresolved_rows, physical_stops=(), optimization=empty_result, route_metrics=RouteMetrics(0.0, 0.0, ()))
+        return OptimizationServiceResult(eligible_delivery_count=0, unresolved_rows=(), physical_stops=(), optimization=empty_result, route_metrics=RouteMetrics(0.0, 0.0, ()))
 
     physical_stops = _resolve_physical_stops(group_physical_stops(deliveries), location_provider)
+    physical_stops = _apply_manual_location_overrides(physical_stops, manual_locations)
+    if manual_locations:
+        overridden_rows = {
+            delivery.row_number
+            for stop in physical_stops
+            if stop.id in manual_locations
+            for delivery in stop.deliveries
+        }
+        unresolved_rows.difference_update(overridden_rows)
     physical_stops_tuple = tuple(physical_stops)
     full_matrix = _build_route_matrix_with_pending(physical_stops, origin=origin, destination=destination, provider=routing_provider)
     problem = OptimizationProblem.from_full_matrix(physical_stops_tuple, full_matrix, origin=origin, destination=destination, start_index=start_index, return_to_start=return_to_start, objective=objective)
     result = optimize(problem)
     _validate_route_coverage(tuple(deliveries), physical_stops_tuple, result.route)
     route_metrics = calculate_route_metrics(result.route, physical_stops, problem.matrix, return_to_start=result.return_to_start, origin_id=result.origin.id if result.origin is not None else None, origin_metric=result.origin_metric, destination_id=result.destination.id if result.destination is not None else None, destination_metric=result.destination_metric)
-    service_result = OptimizationServiceResult(eligible_delivery_count=len(deliveries), unresolved_rows=unresolved_rows, physical_stops=physical_stops_tuple, optimization=result, route_metrics=route_metrics)
+    service_result = OptimizationServiceResult(eligible_delivery_count=len(deliveries), unresolved_rows=tuple(sorted(unresolved_rows)), physical_stops=physical_stops_tuple, optimization=result, route_metrics=route_metrics)
     if not service_result.coverage_complete:
         raise ValueError("Optimized route does not provide complete delivery and physical-stop coverage")
     return service_result
