@@ -27,13 +27,17 @@ function clearError() {
 }
 
 function showAccountError(message) {
-  $("account-error").textContent = message;
-  $("account-error").hidden = false;
+  const error = $("account-error");
+  error.classList.remove("info");
+  error.textContent = message;
+  error.hidden = false;
 }
 
 function clearAccountError() {
-  $("account-error").textContent = "";
-  $("account-error").hidden = true;
+  const error = $("account-error");
+  error.classList.remove("info");
+  error.textContent = "";
+  error.hidden = true;
 }
 
 function authHeaders() {
@@ -64,135 +68,13 @@ async function readApiError(response) {
   try { return (await response.text()).trim(); } catch (_) { return ""; }
 }
 
-function navigationUrl(stop) {
-  return `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(`${stop.latitude},${stop.longitude}`)}&travelmode=driving`;
-}
-
-function locationSummary(stop) {
-  const location = stop.location || {};
-  if (!location.source) return "Localização: GPS da planilha";
-  const confidence = Number(location.confidence);
-  const percentage = Number.isFinite(confidence) ? ` · confiança ${Math.round(confidence * 100)}%` : "";
-  if (location.access_latitude != null && location.access_longitude != null) {
-    return `Ponto de acesso viário resolvido${percentage}`;
-  }
-  if (location.property_latitude != null && location.property_longitude != null) {
-    return `Localização da propriedade resolvida${percentage}`;
-  }
-  return `Localização resolvida${percentage}`;
-}
-
-function stopIcon(stop, visited = false) {
-  const visitedClass = visited ? " visited" : "";
-  return L.divIcon({
-    className: "otimizer-stop-marker",
-    html: `<span class="${visitedClass.trim()}">${stop.sequence}</span>`,
-    iconSize: [36, 36],
-    iconAnchor: [18, 18]
-  });
-}
-
-function markStopVisited(index) {
-  if (index < 0 || index >= currentRoute.length) return;
-  visitedStops.add(index);
-  const stop = currentRoute[index];
-  const marker = markers[index];
-  if (marker && typeof L !== "undefined") marker.setIcon(stopIcon(stop, true));
-  const element = document.querySelector(`.stop[data-index="${index}"]`);
-  if (element) element.classList.add("visited");
-}
-
-async function fetchRouteGeometry(route) {
-  if (route.length < 2) return null;
-  const coordinates = route.map(stop => `${stop.longitude},${stop.latitude}`).join(";");
-  const url = `https://router.project-osrm.org/route/v1/driving/${coordinates}?overview=full&geometries=geojson&steps=false`;
-  const response = await fetch(url, { headers: { Accept: "application/json" } });
-  if (!response.ok) throw Error(`OSRM retornou HTTP ${response.status}`);
-  const result = await response.json();
-  const geometry = result.routes?.[0]?.geometry;
-  if (!geometry) throw Error("OSRM não retornou a geometria da rota.");
-  return geometry;
-}
-
-async function renderMap(route) {
-  if (!route.length || typeof L === "undefined") return;
-  if (!map) map = L.map("map");
-  markers.forEach(marker => marker.remove());
-  markers = [];
-  if (routeLine) {
-    routeLine.remove();
-    routeLine = null;
-  }
-  if (!map._otimizerTiles) {
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", { attribution: "© OpenStreetMap contributors" }).addTo(map);
-    map._otimizerTiles = true;
-  }
-  route.forEach((stop, index) => {
-    const marker = L.marker([stop.latitude, stop.longitude], { icon: stopIcon(stop, visitedStops.has(index)) }).addTo(map);
-    marker.bindPopup(`<strong>Parada ${stop.sequence}</strong><br>${escapeHtml(stop.deliveries?.[0]?.address || "Endereço não informado")}`);
-    marker.on("click", () => showStop(index));
-    markers.push(marker);
-  });
-
-  try {
-    const geometry = await fetchRouteGeometry(route);
-    routeLine = L.geoJSON(geometry, {
-      style: {
-        weight: 6,
-        opacity: 0.8,
-        color: "#2563eb"
-      }
-    }).addTo(map);
-  } catch (error) {
-    console.warn("Não foi possível desenhar a geometria viária da rota:", error);
-  }
-
-  const layers = routeLine ? [routeLine, ...markers] : markers;
-  if (layers.length) {
-    const bounds = L.featureGroup(layers).getBounds();
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [24, 24] });
-  }
-}
-
-function showStop(index) {
-  const stop = currentRoute[index];
-  if (!stop) return;
-  selectedIndex = index;
-  const deliveries = stop.deliveries || [];
-  $("detail-title").textContent = `Parada ${stop.sequence}`;
-  $("detail-content").innerHTML = `
-    <div class="detail-address"><strong>${escapeHtml(deliveries[0]?.address || "Endereço não informado")}</strong><br>${escapeHtml(deliveries[0]?.neighborhood || "")} ${escapeHtml(deliveries[0]?.city || "")}</div>
-    <p><strong>${deliveries.length}</strong> entrega(s) nesta parada</p>
-    <p>${escapeHtml(locationSummary(stop))}</p>
-    ${deliveries.map(delivery => `<article class="delivery-card"><strong>${escapeHtml(delivery.tracking_number || "Rastreio não informado")}</strong><span>${escapeHtml(delivery.address || "Endereço não informado")}</span></article>`).join("")}
-    <a class="navigation-button" href="${navigationUrl(stop)}" target="_blank" rel="noopener">Navegar até esta parada</a>
-  `;
-  $("stop-detail").hidden = false;
-  $("next-stop").hidden = index >= currentRoute.length - 1;
-  document.querySelectorAll(".stop").forEach((element, itemIndex) => {
-    element.classList.toggle("selected", itemIndex === index);
-    element.classList.toggle("visited", visitedStops.has(itemIndex));
-  });
-}
-
-function renderStops(route) {
-  $("stops").innerHTML = route.map((stop, index) => {
-    const primary = stop.deliveries?.[0] || {};
-    const visitedClass = visitedStops.has(index) ? " visited" : "";
-    return `<article class="stop${visitedClass}" data-index="${index}" tabindex="0"><div class="stop-number">${stop.sequence}</div><div><h3>${escapeHtml(primary.address || "Endereço não informado")}</h3><p>${escapeHtml(primary.city || "")}</p><p>${stop.delivery_count} entrega(s)</p></div></article>`;
-  }).join("");
-  document.querySelectorAll(".stop").forEach((element) => {
-    const index = Number(element.dataset.index);
-    element.addEventListener("click", () => showStop(index));
-    element.addEventListener("keydown", (event) => { if (event.key === "Enter" || event.key === " ") showStop(index); });
-  });
-}
-
 function renderSignedOut() {
   $("account-signed-out").hidden = false;
   $("account-signed-in").hidden = true;
   $("license-status").textContent = "";
   $("renew").hidden = true;
+  $("renew").disabled = false;
+  $("renew").dataset.licenseId = "";
 }
 
 function renderSignedIn(email) {
@@ -222,6 +104,7 @@ async function loadLicense() {
   if (response.status === 401) return logoutLocal();
   if (!response.ok) {
     $("license-status").textContent = "Não foi possível consultar a licença.";
+    $("renew").hidden = true;
     return;
   }
   const payload = await response.json();
@@ -229,13 +112,17 @@ async function loadLicense() {
   if (!license || !payload.active) {
     $("license-status").textContent = "Licença inativa. Renove para continuar usando o Otimizer.";
     $("renew").hidden = true;
+    $("renew").dataset.licenseId = "";
     return;
   }
   const expires = new Date(license.expires_at).toLocaleString("pt-BR");
-  const price = (license.price_cents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+  const priceCents = Number(license.price_cents);
+  const price = Number.isFinite(priceCents)
+    ? (priceCents / 100).toLocaleString("pt-BR", { style: "currency", currency: "BRL" })
+    : "valor não informado";
   $("license-status").textContent = `Licença ativa até ${expires} · Renovação: ${price}`;
   $("renew").hidden = false;
-  $("renew").dataset.licenseId = license.license_id;
+  $("renew").dataset.licenseId = license.license_id || "";
 }
 
 function logoutLocal() {
@@ -259,6 +146,7 @@ $("login").addEventListener("click", async () => {
     });
     if (!response.ok) throw Error(await readApiError(response) || "E-mail ou senha inválidos.");
     const result = await response.json();
+    if (!result.access_token || !result.account?.email) throw Error("Resposta de autenticação inválida.");
     accessToken = result.access_token;
     sessionStorage.setItem("otimizer_access_token", accessToken);
     renderSignedIn(result.account.email);
@@ -292,6 +180,7 @@ $("renew").addEventListener("click", async () => {
     });
     if (!response.ok) throw Error(await readApiError(response));
     const charge = await response.json();
+    if (!charge.payment_id) throw Error("O serviço de pagamento retornou uma cobrança inválida.");
     showAccountError(`Pix gerado. Copie o código de pagamento e conclua a cobrança. ID: ${charge.payment_id}`);
     $("account-error").classList.add("info");
   } catch (err) {
@@ -343,9 +232,7 @@ $("optimize").addEventListener("click", async () => {
     const response = await fetch(`${API_BASE}/optimize`, { method: "POST", headers: authHeaders(), body: form });
     if (!response.ok) {
       const detail = await readApiError(response);
-      if (response.status === 401) {
-        logoutLocal();
-      }
+      if (response.status === 401) logoutLocal();
       const error = Error(friendlyApiError(response, detail));
       error.status = response.status;
       throw error;
@@ -356,15 +243,26 @@ $("optimize").addEventListener("click", async () => {
     currentRoute = result.route;
     visitedStops = new Set();
     $("result").hidden = false;
-    $("delivery-count").textContent = result.summary.routed_deliveries;
-    $("stop-count").textContent = result.summary.routed_stops;
-    $("distance").textContent = `${(result.summary.distance_meters / 1000).toFixed(1)} km`;
-    $("duration").textContent = `${Math.round(result.summary.duration_seconds / 60)} min`;
-    $("pending").textContent = `${result.summary.pending} pendência(s)`;
-    $("coverage").textContent = result.summary.coverage_complete
-      ? `✓ Rota completa · ${result.summary.routed_deliveries} entrega(s) · ${result.summary.routed_stops} parada(s)`
-      : `⚠ Rota incompleta · ${result.summary.routed_deliveries} entrega(s) · ${result.summary.routed_stops} parada(s)`;
-    $("coverage").classList.toggle("pending", !result.summary.coverage_complete || result.summary.pending > 0);
+    const summary = result.summary;
+    const routedDeliveries = Number(summary.routed_deliveries);
+    const routedStops = Number(summary.routed_stops);
+    const pending = Number(summary.pending);
+    const distanceMeters = Number(summary.distance_meters);
+    const durationSeconds = Number(summary.duration_seconds);
+    const routingComplete = summary.routing_complete === true;
+    $("delivery-count").textContent = Number.isFinite(routedDeliveries) ? routedDeliveries : "—";
+    $("stop-count").textContent = Number.isFinite(routedStops) ? routedStops : "—";
+    $("distance").textContent = Number.isFinite(distanceMeters)
+      ? `${(distanceMeters / 1000).toFixed(1)} km${routingComplete ? "" : " (parcial)"}`
+      : "—";
+    $("duration").textContent = Number.isFinite(durationSeconds)
+      ? `${Math.round(durationSeconds / 60)} min${routingComplete ? "" : " (parcial)"}`
+      : "—";
+    $("pending").textContent = Number.isFinite(pending) ? `${pending} pendência(s)` : "Pendências não informadas";
+    $("coverage").textContent = summary.coverage_complete
+      ? `✓ Rota completa · ${Number.isFinite(routedDeliveries) ? routedDeliveries : "—"} entrega(s) · ${Number.isFinite(routedStops) ? routedStops : "—"} parada(s)`
+      : `⚠ Rota incompleta · ${Number.isFinite(routedDeliveries) ? routedDeliveries : "—"} entrega(s) · ${Number.isFinite(routedStops) ? routedStops : "—"} parada(s)`;
+    $("coverage").classList.toggle("pending", !summary.coverage_complete || (Number.isFinite(pending) && pending > 0) || !routingComplete);
     renderStops(currentRoute);
     await renderMap(currentRoute);
     $("stop-detail").hidden = true;
