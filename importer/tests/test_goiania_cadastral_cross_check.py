@@ -1,6 +1,6 @@
 from openpyxl import Workbook
 
-# Restored from the previously validated main version; targeted regression will be added after source verification.
+# Temporary restoration marker. The validated file is being recovered from commit history.
 
-def test_placeholder_restored_file():
+def test_restoration_marker():
     assert Workbook is not None
