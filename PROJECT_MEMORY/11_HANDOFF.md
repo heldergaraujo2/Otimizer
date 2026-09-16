@@ -71,9 +71,11 @@ O estado atual da branch `main` inclui, além da implementação municipal e de 
 
 - `94a6ae200cf7452171c1460f0ee77ac2ffb7492a` — alinhamento do teste frontend com o contrato atual de coordenadas opcionais;
 - `a5bc93e78a26d72605acef3f3996a13c72123971` — alinhamento do fixture de evidência municipal com o modelo atual;
-- `78edea8704ecfd7d96a094cfcb985c8babd09dff` — teste do fallback municipal validando que o ponto pertence à geometria da rua, sem exigir um vértice/midpoint específico.
+- `78edea8704ecfd7d96a094cfcb985c8babd09dff` — teste do fallback municipal validando que o ponto pertence à geometria da rua, sem exigir um vértice/midpoint específico;
+- `963b04b5764b86844c26143055d686f75943a245` — invalidação do alfinete municipal quando bairro ou cidade são alterados antes da adição da parada;
+- `10ce2d0efe044300fab4bd2acee9a221510a59b5` — teste da invalidação de seleção municipal obsoleta.
 
-Esses ajustes são de teste/contrato e não removem nem alteram as funcionalidades já validadas no PC.
+Esses ajustes não removem nem alteram as funcionalidades já validadas no PC. O último ajuste corrige um cenário de robustez: depois de selecionar uma rua municipal, alterar bairro/cidade não pode deixar coordenadas de uma seleção anterior serem enviadas como se correspondessem ao novo contexto.
 
 ## Auditoria automatizada atual
 
@@ -82,6 +84,8 @@ No commit `78edea8704ecfd7d96a094cfcb985c8babd09dff`, os workflows do GitHub Act
 - Importer: **128 passed**;
 - Backend: **71 passed, 2 warnings**;
 - Frontend: **sucesso**, incluindo validação de sintaxe e execução de todos os testes frontend.
+
+Depois da correção de invalidação municipal, o workflow de Frontend do commit `10ce2d0efe044300fab4bd2acee9a221510a59b5` também foi confirmado **success**, incluindo sintaxe e todos os testes frontend.
 
 Uma falha anterior do Importer foi reproduzida no CI e investigada antes da correção: os testes do fallback municipal estavam desatualizados em relação ao construtor atual de `LocationEvidence` e depois em relação ao contrato real de ponto sobre a geometria da rua. Não houve evidência de falha do fluxo de produção; os testes foram corrigidos para representar o contrato efetivo.
 
