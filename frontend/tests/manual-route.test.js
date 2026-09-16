@@ -13,8 +13,8 @@ test("manual route exposes address fields and optional map pin", () => {
   assert.match(source, /manual-quadra/);
   assert.match(source, /manual-lote/);
   assert.match(source, /manual-map/);
-  assert.match(source, /latitude: null/);
-  assert.match(source, /longitude: null/);
+  assert.match(source, /latitude:\s*hasMunicipalPoint\s*\?\s*latitude\s*:\s*null/);
+  assert.match(source, /longitude:\s*hasMunicipalPoint\s*\?\s*longitude\s*:\s*null/);
 });
 
 test("manual route sends its stops to the dedicated optimization endpoint", () => {
