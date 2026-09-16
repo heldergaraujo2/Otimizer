@@ -1,3 +1,4 @@
+from otimizer_importer import goiania
 from otimizer_importer.goiania import GoianiaLocationProvider
 from otimizer_importer.location import LocationEvidence
 
@@ -104,10 +105,10 @@ def test_address_only_stop_prefers_matching_street_when_service_returns_multiple
 def test_municipal_service_failure_degrades_to_unresolved_instead_of_fabricating_location(monkeypatch):
     provider = GoianiaLocationProvider(base_url="https://example.test")
 
-    def failing_query(*args, **kwargs):
+    def failing_urlopen(*args, **kwargs):
         raise OSError("municipal service unavailable")
 
-    monkeypatch.setattr(provider, "_query_layer_where", failing_query)
+    monkeypatch.setattr(goiania, "urlopen", failing_urlopen)
 
     resolved = provider.resolve(street_evidence())
 
