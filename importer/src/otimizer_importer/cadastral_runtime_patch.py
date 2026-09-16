@@ -170,5 +170,4 @@ def _resolve_uncached_with_legacy_source(
 
 if not getattr(goiania.GoianiaLocationProvider._resolve_uncached, "_otimizer_legacy_source_patch", False):
     _resolve_uncached_with_legacy_source._otimizer_legacy_source_patch = True
-    goiania.GoanialocationProvider = goiania.GoianiaLocationProvider
     goiania.GoianiaLocationProvider._resolve_uncached = _resolve_uncached_with_legacy_source
