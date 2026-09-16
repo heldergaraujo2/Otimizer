@@ -491,15 +491,40 @@ def _same_street_name(cadastral_name: object, normalized_address: object) -> boo
     return street in address or address in street
 
 
+def _has_cadastral_conflict(evidence: LocationEvidence, attributes: dict) -> bool:
+    """Reject a candidate when explicit delivery evidence contradicts the record."""
+    comparisons = (
+        (evidence.quadra, attributes.get("nrquadra"), _same_normalized_value),
+        (evidence.lote, attributes.get("nrlote"), _same_normalized_value),
+        (evidence.number, attributes.get("nrimovel"), _same_normalized_value),
+    )
+    for expected, actual, matcher in comparisons:
+        if expected and actual not in (None, "") and not matcher(actual, expected):
+            return True
+
+    target_neighborhood = _normalize_text(evidence.neighborhood)
+    actual_neighborhood = _normalize_text(attributes.get("nmbairro"))
+    if target_neighborhood and actual_neighborhood and target_neighborhood != actual_neighborhood:
+        return True
+
+    target_address = _normalize_text(evidence.normalized_address)
+    actual_street = _normalize_text(attributes.get("nmlogradou"))
+    if target_address and actual_street and actual_street not in target_address and target_address not in actual_street:
+        return True
+    return False
+
+
 def _best_matching_cadastral_record(evidence: LocationEvidence, features: list[dict]) -> dict | None:
     if not features:
         return None
 
     target_neighborhood = _normalize_text(evidence.neighborhood)
     target_number = _normalize_number(evidence.number)
-    best: tuple[float, dict] | None = None
+    scored: list[tuple[float, dict]] = []
     for feature in features:
         attributes = feature.get("attributes") or {}
+        if _has_cadastral_conflict(evidence, attributes):
+            continue
         score = 0.0
         if _same_normalized_value(attributes.get("nrquadra"), evidence.quadra):
             score += 4.0
@@ -513,10 +538,19 @@ def _best_matching_cadastral_record(evidence: LocationEvidence, features: list[d
             score += 3.0
         if evidence.latitude is not None and evidence.longitude is not None:
             score += max(0.0, 2.0 - min(2.0, _distance_sq_to_geometry(evidence, feature.get("geometry") or {}) * 1e8))
-        candidate = (score, feature)
-        if best is None or candidate[0] > best[0]:
-            best = candidate
-    return best[1] if best is not None and best[0] >= 9.0 else None
+        scored.append((score, feature))
+
+    if not scored:
+        return None
+
+    top_score = max(score for score, _ in scored)
+    if top_score < 9.0:
+        return None
+
+    top_features = [feature for score, feature in scored if score == top_score]
+    if len(top_features) != 1:
+        return None
+    return top_features[0]
 
 
 def _resolved_with_access(
