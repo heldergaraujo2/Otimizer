@@ -89,6 +89,14 @@
     }));
   }
 
+  function invalidateMunicipalStreetSelection() {
+    const streetInput = $("manual-street");
+    if (!streetInput) return;
+    delete streetInput.dataset.selectedLatitude;
+    delete streetInput.dataset.selectedLongitude;
+    delete streetInput.dataset.selectedStreetId;
+  }
+
   function readManualForm() {
     const value = (id) => $(id).value.trim();
     const address = value("manual-address");
@@ -116,12 +124,7 @@
 
   function clearManualForm() {
     ["manual-address", "manual-street", "manual-number", "manual-neighborhood", "manual-zipcode", "manual-quadra", "manual-lote"].forEach((id) => { $(id).value = ""; });
-    const streetInput = $("manual-street");
-    if (streetInput) {
-      delete streetInput.dataset.selectedLatitude;
-      delete streetInput.dataset.selectedLongitude;
-      delete streetInput.dataset.selectedStreetId;
-    }
+    invalidateMunicipalStreetSelection();
   }
 
   async function optimizeManualRoute() {
@@ -211,6 +214,8 @@
         <div id="manual-status" class="manual-status">Adicione as paradas para começar.</div>
       </section>
     `);
+    $("manual-neighborhood").addEventListener("input", invalidateMunicipalStreetSelection);
+    $("manual-city").addEventListener("input", invalidateMunicipalStreetSelection);
     $("manual-add").addEventListener("click", () => {
       try {
         manualStops.push(readManualForm());
