@@ -83,3 +83,10 @@ def test_api_rejects_zero_zero_manual_location():
     response = post(client, [{"stop_id": "stop-0002", "latitude": 0, "longitude": 0}])
     assert response.status_code == 422
     assert "cannot be 0,0" in response.json()["detail"]
+
+
+def test_api_rejects_unknown_manual_stop():
+    client = TestClient(create_app(FakeRoutingProvider()))
+    response = post(client, [{"stop_id": "stop-9999", "latitude": -16.705, "longitude": -49.255}])
+    assert response.status_code == 422
+    assert "unknown stop" in response.json()["detail"]
