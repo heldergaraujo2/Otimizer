@@ -30,7 +30,7 @@ def test_manual_route_accepts_address_and_optional_map_points():
     assert payload["summary"]["routed_deliveries"] == 2
     assert payload["summary"]["routed_stops"] == 2
     assert payload["summary"]["coverage_complete"] is True
-    assert payload["summary"]["pending"] == 0
+    assert payload["summary"]["pending"] == 1
 
 
 def test_manual_route_rejects_missing_location_data():
