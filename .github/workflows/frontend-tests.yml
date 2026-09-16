@@ -21,7 +21,7 @@ jobs:
         run: |
           node --check frontend/app.js
           node --check frontend/route-safety.js
-          node --check frontend/tests/route-safety.test.js
+          node --check frontend/tests/*.test.js
 
-      - name: Run frontend route safety tests
-        run: node --test frontend/tests/route-safety.test.js
+      - name: Run all frontend tests
+        run: node --test frontend/tests/*.test.js
