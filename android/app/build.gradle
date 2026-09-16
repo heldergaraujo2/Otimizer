@@ -1,0 +1,43 @@
+plugins {
+    id 'com.android.application'
+}
+
+android {
+    namespace 'com.otimizer.app'
+    compileSdk 37
+
+    defaultConfig {
+        applicationId 'com.otimizer.app'
+        minSdk 24
+        targetSdk 37
+        versionCode 1
+        versionName '0.1.0'
+    }
+
+    buildFeatures {
+        buildConfig true
+    }
+
+    packaging {
+        resources {
+            excludes += ['/META-INF/{AL2.0,LGPL2.1}']
+        }
+    }
+
+    tasks.register('syncFrontend', Sync) {
+        from(rootProject.file('../frontend')) {
+            include '*.html'
+            include '*.js'
+            include '*.css'
+        }
+        into layout.projectDirectory.dir('src/main/assets')
+    }
+
+    tasks.named('preBuild').configure {
+        dependsOn tasks.named('syncFrontend')
+    }
+}
+
+dependencies {
+    implementation 'androidx.webkit:webkit:1.17.0'
+}
