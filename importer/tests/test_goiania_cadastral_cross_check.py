@@ -1,6 +1,6 @@
 from openpyxl import Workbook
 
-# Temporary restoration marker. The validated file is being recovered from commit history.
+# Recovery in progress; do not treat this marker as validated test content.
 
-def test_restoration_marker():
-    assert Workbook is not None
+def test_recovery_marker():
+    assert Workbook
