@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import re
+import unicodedata
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
@@ -16,6 +17,7 @@ DEFAULT_FEATURE_BASE_URL = (
 LOT_LAYER_ID = 0
 BLOCK_LAYER_ID = 1
 NEIGHBORHOOD_LAYER_ID = 2
+CADASTRAL_LAYER_ID = 3
 OFFICIAL_NUMBER_LAYER_ID = 5
 STREET_SEGMENT_LAYER_ID = 7
 
@@ -47,32 +49,39 @@ class GoianiaLocationProvider(LocationDataProvider):
         return resolved
 
     def _resolve_uncached(self, evidence: LocationEvidence) -> ResolvedLocation | None:
-        # When parcel evidence is complete, the municipal cadastral lot is
-        # more authoritative for property identity than the spreadsheet GPS.
-        # Use it first even when GPS is present, because spreadsheet points can
-        # fall on the street, inside the parcel, or on an adjacent property.
-        if evidence.neighborhood and evidence.quadra and evidence.lote:
-            parcel_features = self._query_lot_by_parcel(evidence)
-            if parcel_features:
-                best = parcel_features[0]
-                property_point = _representative_point(best.get("geometry") or {})
+        # The municipal Cadastro Imobiliário is the strongest cross-check when
+        # quadra+lote are present. It contains address number, street, block,
+        # lot and neighborhood in the same record, avoiding an early decision
+        # based only on the first matching neighborhood/block polygon.
+        if evidence.quadra and evidence.lote:
+            cadastral_features = self._query_cadastral_by_parcel(evidence)
+            best_cadastral = _best_matching_cadastral_record(evidence, cadastral_features)
+            if best_cadastral is not None:
+                property_point = _point_from_geometry(best_cadastral.get("geometry") or {})
+                if property_point is None:
+                    property_point = _cadastral_coordinate_point(best_cadastral.get("attributes") or {})
                 if property_point is not None:
-                    attributes = best.get("attributes") or {}
-                    cadastral_id = attributes.get("id")
+                    attributes = best_cadastral.get("attributes") or {}
+                    cadastral_id = attributes.get("id") or attributes.get("ci") or attributes.get("nrinscr")
+                    exact_number = _same_normalized_value(attributes.get("nrimovel"), evidence.number)
+                    exact_street = _same_street_name(attributes.get("nmlogradou"), evidence.normalized_address)
                     access_point = self._nearest_street_access(property_point)
                     if access_point is not None:
+                        confidence = 0.97 if exact_number and exact_street else 0.95 if exact_number else 0.92
+                        source = "goiania-cadastral-crosscheck-road-access"
                         return _resolved_with_access(
                             property_point,
                             access_point,
-                            confidence=0.94,
-                            source="goiania-cadastral-parcel-road-access",
+                            confidence=confidence,
+                            source=source,
                             cadastral_id=cadastral_id,
                         )
+                    confidence = 0.93 if exact_number and exact_street else 0.90 if exact_number else 0.86
                     return _resolved_with_access(
                         property_point,
                         None,
-                        confidence=0.90,
-                        source="goiania-cadastral-parcel",
+                        confidence=confidence,
+                        source="goiania-cadastral-crosscheck",
                         cadastral_id=cadastral_id,
                     )
 
@@ -197,6 +206,24 @@ class GoianiaLocationProvider(LocationDataProvider):
             "id,id_qdr,nm_lot,nm_imovel,id_seg",
         )
 
+    def _query_cadastral_by_parcel(self, evidence: LocationEvidence) -> list[dict]:
+        """Query the municipal property register directly using parcel evidence."""
+        if not evidence.quadra or not evidence.lote:
+            return []
+
+        where = (
+            f"nrquadra = '{_escape_where_value(evidence.quadra)}' "
+            f"AND nrlote = '{_escape_where_value(evidence.lote)}'"
+        )
+        if evidence.neighborhood:
+            where += f" AND nmbairro LIKE '%{_escape_where_value(evidence.neighborhood)}%'"
+
+        return self._query_layer_where(
+            CADASTRAL_LAYER_ID,
+            where,
+            "id,id_qdr,nrinscr,cdlogradou,nmlogradou,nrimovel,nrquadra,nrlote,nmbairro,ci,x_coord,y_coord",
+        )
+
     def _query_lot_by_parcel(self, evidence: LocationEvidence) -> list[dict]:
         """Find cadastral lots from neighborhood + block + lot evidence."""
         if not evidence.neighborhood or not evidence.quadra or not evidence.lote:
@@ -252,12 +279,7 @@ class GoianiaLocationProvider(LocationDataProvider):
             "id,id_qdr,nm_lot,nm_imovel,id_seg",
         )
 
-    def _query_layer_where(
-        self,
-        layer_id: int,
-        where: str,
-        out_fields: str,
-    ) -> list[dict]:
+    def _query_layer_where(self, layer_id: int, where: str, out_fields: str) -> list[dict]:
         params = {
             "where": where,
             "outFields": out_fields,
@@ -286,9 +308,7 @@ class GoianiaLocationProvider(LocationDataProvider):
     def _query_street_segments(self, latitude: float, longitude: float) -> list[dict]:
         return self._query_layer_at_point(latitude, longitude, STREET_SEGMENT_LAYER_ID, "id_seg,cd_log,cd_rua")
 
-    def _nearest_street_access(
-        self, property_point: tuple[float, float]
-    ) -> tuple[float, float] | None:
+    def _nearest_street_access(self, property_point: tuple[float, float]) -> tuple[float, float] | None:
         """Find the nearest street candidate around the resolved property point."""
         longitude, latitude = property_point
         segments = self._query_street_segments(latitude, longitude)
@@ -344,6 +364,65 @@ def _resolution_cache_key(evidence: LocationEvidence) -> tuple[object, ...]:
     )
 
 
+def _normalize_text(value: object) -> str | None:
+    if value is None:
+        return None
+    text = unicodedata.normalize("NFKD", str(value)).encode("ascii", "ignore").decode("ascii")
+    text = re.sub(r"[^a-z0-9]+", " ", text.casefold())
+    text = re.sub(r"\s+", " ", text).strip()
+    return text or None
+
+
+def _normalize_number(value: object) -> str | None:
+    if value is None:
+        return None
+    text = str(value).strip().casefold()
+    text = re.sub(r"[^a-z0-9]+", "", text)
+    return text or None
+
+
+def _same_normalized_value(left: object, right: object) -> bool:
+    left_normalized = _normalize_number(left)
+    right_normalized = _normalize_number(right)
+    return left_normalized is not None and left_normalized == right_normalized
+
+
+def _same_street_name(cadastral_name: object, normalized_address: object) -> bool:
+    street = _normalize_text(cadastral_name)
+    address = _normalize_text(normalized_address)
+    if not street or not address:
+        return False
+    return street in address or address in street
+
+
+def _best_matching_cadastral_record(evidence: LocationEvidence, features: list[dict]) -> dict | None:
+    if not features:
+        return None
+
+    target_neighborhood = _normalize_text(evidence.neighborhood)
+    target_number = _normalize_number(evidence.number)
+    best: tuple[float, dict] | None = None
+    for feature in features:
+        attributes = feature.get("attributes") or {}
+        score = 0.0
+        if _same_normalized_value(attributes.get("nrquadra"), evidence.quadra):
+            score += 4.0
+        if _same_normalized_value(attributes.get("nrlote"), evidence.lote):
+            score += 5.0
+        if target_neighborhood and _normalize_text(attributes.get("nmbairro")) == target_neighborhood:
+            score += 4.0
+        if target_number and _same_normalized_value(attributes.get("nrimovel"), target_number):
+            score += 5.0
+        if _same_street_name(attributes.get("nmlogradou"), evidence.normalized_address):
+            score += 3.0
+        if evidence.latitude is not None and evidence.longitude is not None:
+            score += max(0.0, 2.0 - min(2.0, _distance_sq_to_geometry(evidence, feature.get("geometry") or {}) * 1e8))
+        candidate = (score, feature)
+        if best is None or candidate[0] > best[0]:
+            best = candidate
+    return best[1] if best is not None and best[0] >= 9.0 else None
+
+
 def _resolved_with_access(
     property_point: tuple[float, float],
     access_point: tuple[float, float] | None,
@@ -366,20 +445,22 @@ def _resolved_with_access(
     )
 
 
+def _cadastral_coordinate_point(attributes: dict) -> tuple[float, float] | None:
+    x = attributes.get("x_coord")
+    y = attributes.get("y_coord")
+    if isinstance(x, (int, float)) and isinstance(y, (int, float)):
+        # Cadastro coordinates are longitude/latitude in the requested 4326 output.
+        if -180 <= float(x) <= 180 and -90 <= float(y) <= 90:
+            return float(x), float(y)
+    return None
+
+
 def _point_from_geometry(geometry: dict) -> tuple[float, float] | None:
     x = geometry.get("x")
     y = geometry.get("y")
     if isinstance(x, (int, float)) and isinstance(y, (int, float)):
         return float(x), float(y)
     return None
-
-
-def _normalize_number(value: object) -> str | None:
-    if value is None:
-        return None
-    text = str(value).strip().casefold()
-    text = re.sub(r"[^a-z0-9]+", "", text)
-    return text or None
 
 
 def _best_matching_official_number(evidence: LocationEvidence, features: list[dict]) -> dict | None:
