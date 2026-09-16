@@ -9,6 +9,7 @@ from typing import Annotated
 
 from fastapi import FastAPI, File, Form, Header, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
+from openpyxl import Workbook
 from pydantic import BaseModel
 
 from otimizer_importer import OptimizationObjective, RouteEndpoint, optimize_deliveries_file
@@ -29,6 +30,25 @@ class LoginRequest(BaseModel):
 
 class PixChargeRequest(BaseModel):
     license_id: str
+
+
+class ManualRouteStop(BaseModel):
+    address: str | None = None
+    street: str | None = None
+    number: str | None = None
+    neighborhood: str | None = None
+    city: str | None = "Goiânia"
+    zipcode: str | None = None
+    quadra: str | None = None
+    lote: str | None = None
+    latitude: float | None = None
+    longitude: float | None = None
+
+
+class ManualRouteRequest(BaseModel):
+    stops: list[ManualRouteStop]
+    objective: OptimizationObjective = OptimizationObjective.TIME
+    return_to_start: bool = False
 
 
 def _max_upload_bytes() -> int:
@@ -188,6 +208,36 @@ def _serialize(result) -> dict:
     }
 
 
+def _manual_workbook(payload: ManualRouteRequest) -> Workbook:
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append([
+        "AT ID", "Sequence", "Stop", "SPX TN", "Destination Address",
+        "Bairro", "City", "Zipcode/Postal code", "Latitude", "Longitude",
+        "Quadra", "Lote",
+    ])
+    for index, stop in enumerate(payload.stops, start=1):
+        address = (stop.address or "").strip()
+        street = (stop.street or "").strip()
+        number = (stop.number or "").strip()
+        if not address and street:
+            address = f"{street}, {number}" if number else street
+        if not address and not (stop.latitude is not None and stop.longitude is not None):
+            raise HTTPException(status_code=422, detail=f"A parada {index} precisa de rua/endereço ou ponto no mapa")
+        if (stop.latitude is None) != (stop.longitude is None):
+            raise HTTPException(status_code=422, detail=f"A parada {index} precisa de latitude e longitude juntas")
+        if stop.latitude is not None and stop.longitude is not None:
+            if not -90 <= stop.latitude <= 90 or not -180 <= stop.longitude <= 180 or (stop.latitude == 0 and stop.longitude == 0):
+                raise HTTPException(status_code=422, detail=f"A parada {index} possui coordenadas inválidas")
+        sheet.append([
+            f"MANUAL-{index:04d}", str(index), str(index), f"MANUAL-{index:04d}", address or None,
+            (stop.neighborhood or "").strip() or None, (stop.city or "Goiânia").strip() or "Goiânia",
+            (stop.zipcode or "").strip() or None, stop.latitude, stop.longitude,
+            (stop.quadra or "").strip() or None, (stop.lote or "").strip() or None,
+        ])
+    return workbook
+
+
 def create_app(
     routing_provider: RoutingProvider | None = None,
     license_authorizer: LicenseAuthorizer | None = None,
@@ -211,6 +261,20 @@ def create_app(
         if authenticated is None:
             raise HTTPException(status_code=401, detail="Authentication is required")
         return authenticated.account
+
+    def authorize_route(authorization: str | None, account_id: str | None):
+        if auth_service is not None:
+            authenticated = auth_service.authenticate_bearer(authorization)
+            if authenticated is None:
+                raise HTTPException(status_code=401, detail="Authentication is required")
+            account_id = authenticated.account.account_id
+        if license_authorizer is not None:
+            if not account_id or not account_id.strip():
+                raise HTTPException(status_code=401, detail="Authentication is required")
+            decision = license_authorizer.authorize_route(account_id.strip())
+            if not decision.allowed:
+                raise HTTPException(status_code=403, detail={"code": decision.code, "message": decision.message})
+        return account_id
 
     @api.get("/health")
     def health() -> dict[str, str]:
@@ -298,19 +362,7 @@ def create_app(
         authorization: Annotated[str | None, Header()] = None,
         account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None,
     ) -> dict:
-        if auth_service is not None:
-            authenticated = auth_service.authenticate_bearer(authorization)
-            if authenticated is None:
-                raise HTTPException(status_code=401, detail="Authentication is required")
-            account_id = authenticated.account.account_id
-
-        if license_authorizer is not None:
-            if not account_id or not account_id.strip():
-                raise HTTPException(status_code=401, detail="Authentication is required")
-            decision = license_authorizer.authorize_route(account_id.strip())
-            if not decision.allowed:
-                raise HTTPException(status_code=403, detail={"code": decision.code, "message": decision.message})
-
+        account_id = authorize_route(authorization, account_id)
         if not file.filename or Path(file.filename).suffix.lower() != ".xlsx":
             raise HTTPException(status_code=422, detail="The uploaded file must be an .xlsx workbook")
         origin = _endpoint(origin_latitude, origin_longitude, "origin")
@@ -333,6 +385,37 @@ def create_app(
                 location_provider=location_provider, origin=origin,
                 destination=destination, return_to_start=return_to_start, objective=objective,
                 manual_locations=parsed_manual_locations,
+            )
+        except RoutingError as exc:
+            raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc
+        except OptimizationError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except (ValueError, OSError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+        finally:
+            temporary_path.unlink(missing_ok=True)
+        return _serialize(result)
+
+    @api.post("/optimize-manual")
+    def optimize_manual_route(
+        payload: ManualRouteRequest,
+        authorization: Annotated[str | None, Header()] = None,
+        account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None,
+    ) -> dict:
+        authorize_route(authorization, account_id)
+        if not payload.stops:
+            raise HTTPException(status_code=422, detail="Add at least one stop to the manual route")
+        if len(payload.stops) > 500:
+            raise HTTPException(status_code=422, detail="A manual route cannot contain more than 500 stops")
+        workbook = _manual_workbook(payload)
+        with tempfile.NamedTemporaryFile(suffix=".xlsx", delete=False) as temporary:
+            temporary_path = Path(temporary.name)
+        try:
+            workbook.save(temporary_path)
+            result = optimize_deliveries_file(
+                str(temporary_path), routing_provider=routing_provider,
+                location_provider=location_provider, objective=payload.objective,
+                return_to_start=payload.return_to_start,
             )
         except RoutingError as exc:
             raise HTTPException(status_code=502, detail=f"Routing provider failed: {exc}") from exc
