@@ -78,3 +78,37 @@ def test_address_only_stop_can_fall_back_without_neighborhood(monkeypatch):
     assert resolved is not None
     assert resolved.source == "goiania-municipal-street"
     assert_point_is_on_test_street(resolved)
+
+
+def test_address_only_stop_prefers_matching_street_when_service_returns_multiple_features(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+    wrong = municipal_street_feature()
+    wrong["attributes"]["id"] = "STREET-WRONG"
+    wrong["attributes"]["nm_log"] = "Rua Outra"
+    wrong["attributes"]["nm"] = "Rua Outra"
+    exact = municipal_street_feature()
+
+    monkeypatch.setattr(
+        provider,
+        "_query_layer_where",
+        lambda layer_id, where, out_fields: [wrong, exact] if layer_id == 10 else [],
+    )
+
+    resolved = provider.resolve(street_evidence())
+
+    assert resolved is not None
+    assert resolved.source == "goiania-municipal-street"
+    assert_point_is_on_test_street(resolved)
+
+
+def test_municipal_service_failure_degrades_to_unresolved_instead_of_fabricating_location(monkeypatch):
+    provider = GoianiaLocationProvider(base_url="https://example.test")
+
+    def failing_query(*args, **kwargs):
+        raise OSError("municipal service unavailable")
+
+    monkeypatch.setattr(provider, "_query_layer_where", failing_query)
+
+    resolved = provider.resolve(street_evidence())
+
+    assert resolved is None
