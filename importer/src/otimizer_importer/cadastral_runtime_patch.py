@@ -23,6 +23,74 @@ if not hasattr(goiania, "_point_from_geometry_original"):
     goiania._point_from_geometry = _point_from_geometry
 
 
+_original_best_matching_cadastral_record = goiania._best_matching_cadastral_record
+
+
+def _explicit_street_text(evidence: LocationEvidence) -> str | None:
+    """Extract only the street portion when the address explicitly supplies it."""
+    raw = str(evidence.address or evidence.normalized_address or "").strip()
+    if not raw:
+        return None
+    raw = re.sub(r"\b(?:qd|q|quadra)\s*[\w-]+\b", " ", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\b(?:lt|lote)\s*[\w-]+\b", " ", raw, flags=re.IGNORECASE)
+    if evidence.number:
+        raw = re.sub(rf"\b{re.escape(str(evidence.number).strip())}\b", " ", raw, flags=re.IGNORECASE)
+    raw = re.sub(r"\s+", " ", raw).strip(" ,-./")
+    return goiania._normalize_text(raw)
+
+
+def _cadastral_candidate_matches_explicit_evidence(
+    evidence: LocationEvidence,
+    feature: dict,
+) -> bool:
+    """Return False only when the municipal record contradicts explicit evidence."""
+    attributes = feature.get("attributes") or {}
+
+    checks = (
+        (evidence.quadra, attributes.get("nrquadra"), _same_number),
+        (evidence.lote, attributes.get("nrlote"), _same_number),
+        (evidence.number, attributes.get("nrimovel"), _same_number),
+        (evidence.neighborhood, attributes.get("nmbairro"), _same_text),
+    )
+    for expected, actual, comparator in checks:
+        if expected and actual and not comparator(expected, actual):
+            return False
+
+    street_text = _explicit_street_text(evidence)
+    cadastral_street = attributes.get("nmlogradou")
+    if street_text and cadastral_street and not goiania._same_street_name(cadastral_street, street_text):
+        return False
+    return True
+
+
+def _same_number(left: object, right: object) -> bool:
+    return goiania._normalize_number(left) == goiania._normalize_number(right)
+
+
+def _same_text(left: object, right: object) -> bool:
+    return goiania._normalize_text(left) == goiania._normalize_text(right)
+
+
+def _best_matching_cadastral_record_with_guard(
+    evidence: LocationEvidence,
+    features: list[dict],
+) -> dict | None:
+    """Keep only cadastral records that do not contradict explicit evidence."""
+    compatible = [
+        feature
+        for feature in features
+        if _cadastral_candidate_matches_explicit_evidence(evidence, feature)
+    ]
+    if not compatible:
+        return None
+    return _original_best_matching_cadastral_record(evidence, compatible)
+
+
+if not getattr(goiania._best_matching_cadastral_record, "_otimizer_conflict_guard", False):
+    _best_matching_cadastral_record_with_guard._otimizer_conflict_guard = True
+    goiania._best_matching_cadastral_record = _best_matching_cadastral_record_with_guard
+
+
 _original_resolve_uncached = goiania.GoianiaLocationProvider._resolve_uncached
 
 
