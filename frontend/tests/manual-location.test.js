@@ -1,5 +1,6 @@
 const fs = require("node:fs");
 const path = require("node:path");
+const assert = require("node:assert/strict");
 const test = require("node:test");
 const vm = require("node:vm");
 
@@ -10,7 +11,6 @@ function loadUi() {
     console,
     setStatus() {},
     $() { return { hidden: true, textContent: "", innerHTML: "", classList: { toggle() {}, add() {} }, insertAdjacentHTML() {}, addEventListener() {} }; },
-    escapeHtml(value) { return String(value ?? ""); },
     currentRoute: [],
     markers: [],
     visitedStops: new Set(),
