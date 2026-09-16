@@ -76,18 +76,9 @@ def _location_evidence_variants(evidence: LocationEvidence) -> tuple[LocationEvi
     variants = [evidence]
     neighborhood = (evidence.neighborhood or "").strip()
     if neighborhood:
-        stripped = neighborhood
-        while True:
-            candidate = stripped.split(" ", 1)[1] if " " in stripped else stripped
-            if candidate.casefold() == stripped.casefold():
-                break
-            prefix = stripped.split(" ", 1)[0].casefold()
-            if prefix not in {"setor", "s"}:
-                break
-            stripped = candidate.strip()
-            if stripped and stripped.casefold() != neighborhood.casefold():
-                variants.append(replace(evidence, neighborhood=stripped))
-            break
+        parts = neighborhood.split(None, 1)
+        if len(parts) == 2 and parts[0].casefold() in {"setor", "s"}:
+            variants.append(replace(evidence, neighborhood=parts[1].strip()))
         variants.append(replace(evidence, neighborhood=None))
     unique: list[LocationEvidence] = []
     seen: set[tuple[object, ...]] = set()
@@ -153,6 +144,10 @@ def _apply_manual_location_overrides(stops: list[PhysicalStop], manual_locations
     """Apply driver-confirmed map points without changing original delivery evidence."""
     if not manual_locations:
         return stops
+    stop_ids = {stop.id for stop in stops}
+    unknown = set(manual_locations) - stop_ids
+    if unknown:
+        raise ValueError(f"Manual location references unknown stop(s): {', '.join(sorted(unknown))}")
     result: list[PhysicalStop] = []
     for stop in stops:
         point = manual_locations.get(stop.id)
@@ -160,6 +155,10 @@ def _apply_manual_location_overrides(stops: list[PhysicalStop], manual_locations
             result.append(stop)
             continue
         latitude, longitude = point
+        if not -90 <= latitude <= 90 or not -180 <= longitude <= 180:
+            raise ValueError(f"Manual location for {stop.id} has invalid coordinates")
+        if latitude == 0 and longitude == 0:
+            raise ValueError(f"Manual location for {stop.id} cannot be 0,0")
         result.append(replace(
             stop,
             latitude=latitude,
