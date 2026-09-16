@@ -17,6 +17,15 @@ test("manual route exposes address fields and optional map pin", () => {
   assert.match(source, /longitude:\s*hasMunicipalPoint\s*\?\s*longitude\s*:\s*null/);
 });
 
+test("manual route invalidates a municipal street pin when its context changes", () => {
+  assert.match(source, /function invalidateMunicipalStreetSelection\(\)/);
+  assert.match(source, /manual-neighborhood\"\)\.addEventListener\(\"input\", invalidateMunicipalStreetSelection\)/);
+  assert.match(source, /manual-city\"\)\.addEventListener\(\"input\", invalidateMunicipalStreetSelection\)/);
+  assert.match(source, /delete streetInput\.dataset\.selectedLatitude/);
+  assert.match(source, /delete streetInput\.dataset\.selectedLongitude/);
+  assert.match(source, /delete streetInput\.dataset\.selectedStreetId/);
+});
+
 test("manual route sends its stops to the dedicated optimization endpoint", () => {
   assert.match(source, /\/optimize-manual/);
   assert.match(source, /return_to_start/);
