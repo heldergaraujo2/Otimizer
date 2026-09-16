@@ -12,6 +12,9 @@ venv/
 *.csv
 *.parquet
 
+# Temporary probes / local scratch files
+_tmp_*
+
 # Environment / secrets
 .env
 .env.*
