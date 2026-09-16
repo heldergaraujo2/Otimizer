@@ -7,6 +7,7 @@ let currentRoute = [];
 let selectedIndex = -1;
 let visitedStops = new Set();
 let accessToken = sessionStorage.getItem("otimizer_access_token") || "";
+let manualLocations = {};
 
 const escapeHtml = (value) => String(value ?? "").replace(/[&<>\"]/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", "\"": "&quot;" }[char]));
 
@@ -192,11 +193,18 @@ $("renew").addEventListener("click", async () => {
 
 $("file-input").addEventListener("change", (event) => {
   const file = event.target.files[0];
+  manualLocations = {};
   $("file-name").textContent = file ? file.name : "Selecione um arquivo .xlsx";
   $("optimize").disabled = !file;
   clearError();
   setStatus(file ? "Arquivo pronto" : "Pronto");
 });
+
+window.otimizerManualLocationSelected = (stopId, latitude, longitude) => {
+  manualLocations[stopId] = { stop_id: stopId, latitude, longitude };
+  setStatus("Localização confirmada · recalculando toda a rota…", "loading");
+  $("optimize").click();
+};
 
 $("close-detail").addEventListener("click", () => { $("stop-detail").hidden = true; selectedIndex = -1; });
 $("next-stop").addEventListener("click", () => {
@@ -212,6 +220,7 @@ $("optimize").addEventListener("click", async () => {
   form.append("file", file);
   form.append("objective", $("objective").value);
   form.append("return_to_start", $("return-to-start").value);
+  if (Object.keys(manualLocations).length) form.append("manual_locations", JSON.stringify(Object.values(manualLocations)));
   const endpoint = (latId, lonId, latName, lonName) => {
     const lat = $(latId).value.trim(), lon = $(lonId).value.trim();
     if (!lat && !lon) return;
@@ -221,7 +230,7 @@ $("optimize").addEventListener("click", async () => {
 
   clearError();
   $("optimize").disabled = true;
-  setStatus("Otimizando…", "loading");
+  setStatus(Object.keys(manualLocations).length ? "Reotimizando toda a rota…" : "Otimizando…", "loading");
   try {
     endpoint("origin-lat", "origin-lon", "origin_latitude", "origin_longitude");
     endpoint("destination-lat", "destination-lon", "destination_latitude", "destination_longitude");
@@ -267,7 +276,7 @@ $("optimize").addEventListener("click", async () => {
     await renderMap(currentRoute);
     $("stop-detail").hidden = true;
     selectedIndex = -1;
-    setStatus("Rota pronta", "success");
+    setStatus(routingComplete ? "Rota pronta" : "Rota pronta com pendência(s)", routingComplete ? "success" : "");
   } catch (err) {
     const message = err instanceof TypeError
       ? "Não foi possível conectar à API. Verifique se o backend está em execução."
