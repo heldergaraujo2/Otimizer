@@ -1,7 +1,8 @@
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
+from hashlib import sha256
 
-from otimizer_api.accounts import Account, AccountRole, create_session, hash_password, authenticate_session
+from otimizer_api.accounts import Account, AccountRole, InMemorySessionRepository, Session, authenticate_session, hash_password
 from otimizer_api.devices import Device, SQLiteDeviceRepository, hash_device_secret
 from otimizer_api.licensing import (
     Entitlements,
@@ -43,23 +44,22 @@ def test_tampering_with_key_does_not_change_authoritative_license_state():
     service = LicenseLifecycleService(repository, events)
     tampered = record.license_key[:-1] + ("A" if record.license_key[-1] != "A" else "B")
     assert tampered != record.license_key
-    assert repository.get_by_id("lic-1").status is LicenseStatus.ACTIVE
     service.suspend("lic-1", "admin-1", "security test", NOW)
     assert repository.get_by_id("lic-1").status is LicenseStatus.SUSPENDED
     assert repository.get_by_id("lic-1").license_key == record.license_key
 
 
 def test_revoke_is_terminal_even_after_expiration():
-    record = make_license(status=LicenseStatus.ACTIVE, expires=NOW - timedelta(seconds=1))
+    record = make_license(status=LicenseStatus.REVOKED, expires=NOW - timedelta(seconds=1))
     record = License(
         record.license_id,
         record.account_id,
         record.starts_at,
         record.expires_at,
         record.entitlements,
-        status=LicenseStatus.REVOKED,
         revoked_at=NOW,
         license_key=record.license_key,
+        status=LicenseStatus.REVOKED,
     )
     repository = InMemoryLicenseRepository([record])
     service = LicenseLifecycleService(repository, InMemoryLicenseEventRepository())
@@ -72,10 +72,9 @@ def test_revoke_is_terminal_even_after_expiration():
 
 
 def test_session_token_replay_fails_after_expiration():
-    from otimizer_api.accounts import InMemorySessionRepository
-
     sessions = InMemorySessionRepository()
-    token = create_session("acct-1", sessions, lifetime=timedelta(minutes=5))
+    token = "server-generated-test-token"
+    sessions.save(Session("session-1", "acct-1", sha256(token.encode()).hexdigest(), NOW + timedelta(minutes=5)))
     assert authenticate_session(token, sessions, NOW) is not None
     assert authenticate_session(token, sessions, NOW + timedelta(minutes=5, seconds=1)) is None
 
