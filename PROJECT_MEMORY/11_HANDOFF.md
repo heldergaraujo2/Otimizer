@@ -25,36 +25,29 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - navegação para o painel no app principal somente para `ADMIN`;
 - CI frontend inclui sintaxe e testes do painel.
 
-## Segurança adversarial — concluído nesta iteração
+## Segurança e atomicidade — implementado nesta iteração
 
-Foi criado `backend/tests/test_licensing_security_adversarial.py` com cobertura de:
+- `LicenseLifecycleService` agora centraliza o commit de transições e usa `save_with_event` quando o repositório durável oferece suporte transacional;
+- `SQLiteLicenseRepository.save_with_event()` usa `BEGIN IMMEDIATE` e grava licença + evento na mesma transação;
+- falha na gravação do evento provoca rollback da mudança de licença;
+- adicionados testes de atomicidade/rollback em `backend/tests/test_license_atomicity.py`;
+- testes adversariais anteriores permanecem: adulteração de chave, revogação terminal, replay de sessão, hash de segredo e concorrência de device binding.
 
-- chave comercial não derivada do ID interno;
-- tentativa de adulteração da chave sem mutação do registro autoritativo;
-- revogação terminal;
-- expiração server-side de sessão e rejeição de replay após expiração;
-- segredo de dispositivo persistido somente como hash;
-- concorrência de oito tentativas simultâneas contra `max_devices=1` em SQLite, garantindo somente um binding ativo.
+## Validação
 
-## Validação CI
-
-O commit desta suíte disparou os workflows do GitHub Actions. No momento do registro, o workflow de backend estava `in_progress` e o frontend estava `queued`; portanto, não declarar suíte verde até observar a conclusão.
-
-## Ressalva crítica antes de produção
-
-A atomicidade completa de **licença + auditoria** ainda não está concluída. O `LicenseLifecycleService` atualmente salva a licença e depois registra o evento em operações separadas. A próxima implementação deve colocar mudança de estado e evento na mesma transação e incluir teste de rollback para impedir estado comercial sem trilha de auditoria.
-
-Também devem ser concluídos os testes de abuso/isolamento dos endpoints administrativos e a revisão de rate limiting aplicável.
+As alterações foram enviadas diretamente ao `main`. A suíte local não está disponível neste ambiente; a validação definitiva deve usar os workflows do GitHub Actions e não deve ser declarada verde sem conclusão observável.
 
 ## Próxima etapa obrigatória
 
-**Hardening transacional do licenciamento**, nesta ordem:
+**Hardening final do licenciamento**, nesta ordem:
 
-1. transação única licença + evento;
-2. rollback quando o evento falhar;
-3. conflitos concorrentes em ativação/renovação/revogação;
-4. abuso, enumeração, isolamento entre contas e vazamento nos endpoints administrativos;
-5. somente depois, integração Android do binding.
+1. observar e corrigir eventuais falhas do CI após a mudança transacional;
+2. testes concorrentes específicos de ativação/renovação/revogação para impedir lost update;
+3. abuso, enumeração, isolamento entre contas e vazamento nos endpoints administrativos;
+4. revisão de rate limiting, sessões/tokens e limites administrativos;
+5. integração Android do binding no fluxo real de login/licença;
+6. PIX de produção com provedor/webhook autenticado;
+7. backup/restore com teste real.
 
 ## Regras de continuidade
 
