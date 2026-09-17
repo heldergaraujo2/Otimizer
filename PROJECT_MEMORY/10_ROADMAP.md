@@ -70,6 +70,7 @@ Fluxo-alvo:
 - Persistência SQLite.
 - Endpoint de otimização.
 - Tratamento dos principais erros de entrada/roteamento.
+- CORS compatível com o shell Android de teste.
 
 ### Fase 7 — Frontend operacional
 **STATUS: CONCLUÍDA NA BASE ATUAL**
@@ -82,62 +83,81 @@ Fluxo-alvo:
 - Lista e detalhes das paradas.
 - Navegação para a próxima parada.
 - Estado visual de parada visitada.
+- Fluxo de login.
+- Rota manual e reotimização.
 
 ### Fase 8 — Validação real no PC
-**STATUS: PRÓXIMA FASE PRINCIPAL**
+**STATUS: CONCLUÍDA PARA O FLUXO FUNCIONAL PRINCIPAL**
 
-Validar no computador do usuário, sem alterar os XLSX:
+Validações realizadas:
 
-1. Ambiente Python/venv.
-2. Suite importer.
-3. Suite backend.
-4. Backend iniciando.
-5. Frontend iniciando.
-6. Primeiro XLSX real.
-7. Segundo XLSX real.
-8. Terceiro XLSX real.
-9. Caso sem GPS válido.
-10. Conservação de 100% das entregas.
-11. PhysicalStops coerentes.
-12. Rota completa.
-13. Mapa e marcadores.
-14. Detalhes.
-15. Navegação.
-16. Repetibilidade.
+- Ambiente Python/venv.
+- Suite automatizada do projeto.
+- Backend iniciando.
+- Frontend iniciando.
+- **Mais de 30 XLSX reais** processados no PC.
+- Caso com localização incompleta/pendente.
+- Conservação das entregas.
+- PhysicalStops coerentes.
+- Otimização e reotimização.
+- Mapa, marcadores e detalhes.
+- Autocomplete municipal e alfinete de rua.
+- Rota manual.
+
+O usuário informou que o fluxo foi **100% funcional conforme esperado** nos testes realizados no PC. Permanecem validações de robustez e produção fora do escopo dessa conclusão.
+
+### Fase 9 — Primeiro teste físico Android
+**STATUS: CONCLUÍDA — PRIMEIRO FLUXO OPERACIONAL APROVADO**
+
+Validação realizada pelo usuário em 17/09/2026:
+
+- APK instalado no Android.
+- Login funcionando.
+- Novo XLSX importado pelo aplicativo.
+- Otimização automática funcionando.
+- Rota/paradas manuais funcionando.
+- Reotimização após alteração manual funcionando.
+- Comunicação do aparelho com backend local pela rede LAN funcionando.
+
+Correções que viabilizaram o teste:
+
+- WebView configurado para permitir mixed content no cenário de backend HTTP LAN de desenvolvimento.
+- Origem `https://appassets.androidplatform.net` adicionada ao CORS padrão do backend.
+- Teste automatizado da origem Android adicionado.
+- Workflow de geração do APK validado anteriormente com sucesso.
+
+**Limite desta fase:** isso comprova o fluxo operacional inicial em aparelho físico, mas não representa aprovação para produção. Ainda faltam backend remoto, segurança de produção, assinatura/release, testes de rede instável, permissões/retomada, cargas maiores e distribuição.
 
 ## Próximas evoluções técnicas
 
-### Prioridade A — Fechar validação de localização
-- Validar o caso real de `quadra + lote` no PC.
-- Medir a diferença entre GPS original, ponto cadastral da propriedade e ponto de acesso viário.
+### Prioridade A — Robustez de localização
+- Validar mais casos reais de `quadra + lote` no campo.
+- Medir diferença entre GPS original, ponto cadastral da propriedade e ponto de acesso viário.
 - Melhorar seleção do ponto de acesso considerando a face do lote/logradouro quando os dados oficiais permitirem.
 - Adicionar mais casos de endereço incompleto e conflitos de evidência.
 - Criar cache/index local das geometrias quando a carga real justificar.
 
-### Regra obrigatória de fallback — rua correta
-
-Quando não for possível determinar com segurança o ponto exato da propriedade, **a parada não deve ser descartada nem retirada da otimização se a rua correta puder ser determinada com confiança suficiente**.
-
-Hierarquia operacional:
-
-1. GPS válido e confiável → usar o ponto geográfico disponível.
-2. Quadra + lote e demais evidências cadastrais → localizar a propriedade e tentar determinar o ponto de acesso viário.
-3. Propriedade localizada, mas acesso exato não determinado → procurar o trecho/face de logradouro correspondente ao lote.
-4. Ponto exato da propriedade indisponível, mas rua correta identificada → criar um **ponto de fallback na rua correta**, preferencialmente no trecho relacionado ao endereço/lote, e manter a parada na matriz de roteamento e na otimização.
-5. Somente quando nem a rua correta puder ser determinada com confiança suficiente → manter a entrega como pendente de geolocalização, sem inventar coordenadas.
-
-O ponto de fallback deve ser explicitamente identificado como **aproximado**, separado do ponto da propriedade e do ponto de acesso exato. O objetivo operacional é permitir que o motorista chegue à rua correta e use `quadra + lote` e demais informações do endereço para localizar a residência/propriedade.
-
-Essa regra é parte dos critérios de qualidade do produto: **uma entrega válida nunca deve ser perdida apenas porque o sistema não conseguiu cravar o alfinete na porta do imóvel.**
-
-### Prioridade B — Estabilizar produção
-- Confirmar todos os workflows do GitHub Actions verdes.
+### Prioridade B — Estabilização técnica e CI
+- Confirmar execução verde dos quatro workflows ativos no estado atual: Android APK, Backend, Frontend e Importer.
+- Manter testes automatizados verdes a cada alteração.
 - Resolver qualquer divergência entre ambiente local e CI.
 - Fazer teste de carga com planilhas maiores.
 - Medir tempo de resolução cadastral e matriz OSRM.
 - Revisar dependências e warnings conhecidos.
+- Auditar múltiplas pernas não roteáveis e falhas de serviços externos.
+- Auditar repetibilidade/determinismo em cenários adicionais.
 
-### Prioridade C — Intervenção manual do motorista
+### Prioridade C — Android de campo e produção
+- Testar perda/retomada de conexão.
+- Testar comportamento quando o backend estiver remoto, e não no PC.
+- Validar configuração de ambiente sem IP LAN fixo.
+- Revisar permissões Android e ciclo de vida do aplicativo.
+- Testar importação de arquivos maiores no aparelho.
+- Testar rotas longas e múltiplas reotimizações.
+- Preparar assinatura de release e pacote de distribuição.
+- Definir estratégia segura de armazenamento de configuração e credenciais.
+
+### Prioridade D — Intervenção manual do motorista
 **PLANEJADA — NÃO IMPLEMENTAR AINDA**
 
 - Selecionar uma parada.
@@ -148,7 +168,21 @@ Essa regra é parte dos critérios de qualidade do produto: **uma entrega válid
 - Atualizar sequência, mapa, métricas e navegação.
 - Permitir novas intervenções segundo regras que serão definidas antes da implementação.
 
-### Prioridade D — Produto comercial
+Observação: a capacidade atual de **adicionar uma parada manual e reotimizar** já foi validada; esta prioridade se refere ao controle avançado da posição/ordem de uma parada existente.
+
+### Prioridade E — Sistema oficial de atualização por patch
+**PLANEJADO — NÃO IMPLEMENTAR AINDA**
+
+Requisito registrado em `PROJECT_MEMORY/12_UPDATE_SYSTEM.md`.
+
+Objetivo:
+
+- alterações compatíveis de frontend/conteúdo devem poder chegar ao aplicativo por patch sem exigir novo APK;
+- alterações nativas Android continuam exigindo novo APK;
+- futuro Update Manager deverá trabalhar com versão, compatibilidade, checksum, integridade, rollback e fallback seguro;
+- o APK continua sendo a base nativa do aplicativo.
+
+### Prioridade F — Produto comercial
 Depois da estabilidade técnica:
 
 - Pagamentos Pix em produção.
@@ -170,9 +204,12 @@ Depois da estabilidade técnica:
 - Pontos de propriedade, acesso exato e fallback de rua tratados corretamente e identificados por nível de confiança.
 - Rota calculada por malha viária real.
 - Mapa, sequência e navegação coerentes.
-- Três XLSX reais validados no PC.
+- Mais de 30 XLSX reais validados no PC.
+- Primeiro fluxo operacional Android validado em aparelho físico.
 - Caso sem GPS válido validado no PC.
 - Falhas de serviços externos diferenciadas de falhas do código.
+- Backend remoto/deploy preparado e testado.
+- APK de release assinado e processo de distribuição definido.
 - Estado do GitHub sincronizado.
 - Relatório final de aceitação produzido.
 
