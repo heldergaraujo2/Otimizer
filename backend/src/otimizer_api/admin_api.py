@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 from .accounts import AccountRole
 from .auth import AuthenticationService
-from .devices import DeviceRepository
+from .devices import DeviceBindingService, DeviceRepository
 from .licensing import Entitlements, License, LicenseEventRepository, LicenseLifecycleError, LicenseLifecycleService, LicenseRepository, LicenseStatus, create_license_event
 
 
@@ -28,6 +28,10 @@ class RenewalRequest(BaseModel):
 
 class ReasonRequest(BaseModel):
     reason: str = Field(min_length=1, max_length=1000)
+
+class DeviceBindRequest(BaseModel):
+    license_id: str = Field(min_length=1)
+    device_secret: str = Field(min_length=32, max_length=4096)
 
 
 def _serialize_license(record: License, now: datetime | None = None) -> dict:
@@ -54,16 +58,29 @@ def _list_licenses(repository: LicenseRepository) -> list[License]:
 
 
 def register_admin_routes(api, *, auth_service: AuthenticationService, licenses: LicenseRepository, events: LicenseEventRepository, lifecycle: LicenseLifecycleService, devices: DeviceRepository) -> None:
-    def require_admin(authorization: str | None):
+    def require_authenticated(authorization: str | None):
         authenticated=auth_service.authenticate_bearer(authorization)
         if authenticated is None: raise HTTPException(status_code=401, detail="Authentication is required")
-        if authenticated.account.role != AccountRole.ADMIN: raise HTTPException(status_code=403, detail="Administrator role is required")
         return authenticated.account
+    def require_admin(authorization: str | None):
+        account=require_authenticated(authorization)
+        if account.role != AccountRole.ADMIN: raise HTTPException(status_code=403, detail="Administrator role is required")
+        return account
     def transition(call):
         try: return call()
         except LicenseLifecycleError as exc:
             message=str(exc); status=404 if message=="license not found" else 409
             raise HTTPException(status_code=status, detail=message) from exc
+
+    @api.post("/devices/bind")
+    def bind_device(payload: DeviceBindRequest, authorization: str | None = Header(default=None)) -> dict:
+        account=require_authenticated(authorization)
+        binding=DeviceBindingService(licenses, devices, events)
+        allowed, device, code=binding.register(account.account_id, payload.license_id.strip(), payload.device_secret, datetime.now(timezone.utc))
+        if allowed and device is not None:
+            return {"bound":True,"code":code,"device":_serialize_device(device)}
+        status=409 if code == "DEVICE_LIMIT_REACHED" else 403 if code.startswith("LICENSE_") else 422
+        raise HTTPException(status_code=status, detail=code)
 
     @api.post("/admin/licenses")
     def generate_license(payload: LicenseGenerateRequest, authorization: str | None = Header(default=None)) -> dict:
