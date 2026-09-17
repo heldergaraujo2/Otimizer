@@ -70,11 +70,25 @@ A suíte `backend/tests/test_licensing_security_adversarial.py` cobre manipulaç
 
 `backend/tests/test_device_binding_api.py` e `backend/tests/test_device_authorization.py` cobrem autenticação, limite, reuso, revogação, isolamento e bloqueio server-side da rota sem binding válido.
 
-### Próxima subfase do licenciamento
+### Subfase PIX — fundação de produção implementada
 
-1. Confirmar CI backend após o hardening de device binding e corrigir qualquer regressão real.
-2. Testar reinstalação/restore de dados, segundo dispositivo, limite, revogação e sessão expirada em ambiente Android físico.
-3. Implementar PIX de produção com provedor e webhook autenticado.
+Foi adicionada `backend/src/otimizer_api/pix_webhook.py`, uma camada provider-neutral para validar webhooks Pix antes de alterar pagamentos/licenças:
+
+- HMAC-SHA256 sobre `timestamp + '.' + raw_body`;
+- janela temporal configurável contra replay;
+- comparação em tempo constante;
+- suporte ao formato `sha256=`;
+- validação estrita do evento, pagamento, valor e status;
+- nenhuma credencial de PSP no APK ou no código-fonte;
+- testes de assinatura válida, adulteração, replay, campos obrigatórios e status/valor inválidos em `backend/tests/test_pix_webhook.py`.
+
+**Importante:** isto fecha a fundação de segurança do webhook, mas **não** significa que o Pix de produção esteja concluído. Ainda falta selecionar/configurar o PSP real, implementar o adaptador conforme a documentação oficial desse provedor, receber o webhook no endpoint da API, persistir idempotência por evento e executar homologação com credenciais reais.
+
+### Próximas etapas obrigatórias
+
+1. Confirmar GitHub Actions do ciclo após os commits de webhook e corrigir qualquer regressão.
+2. Executar teste físico Android de login → licença → binding → otimização; revogar dispositivo pelo painel e confirmar bloqueio; validar segundo dispositivo/max_devices, reinstalação/restore e sessão expirada.
+3. Escolher/configurar o PSP Pix real e ligar o adaptador ao fluxo assinado/idempotente.
 4. Implementar backup/restauração do licenciamento e executar teste real de restore.
 5. Avançar para arquitetura/VPS/HTTPS/OSRM/DB de produção e testes completos pela Internet.
 
