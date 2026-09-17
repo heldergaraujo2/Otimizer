@@ -8,76 +8,85 @@
 
 O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimização, backend, frontend e primeiro fluxo Android físico está validado conforme registros anteriores. O projeto está na etapa de robustez/produção e conclusão do sistema comercial de licenças.
 
-## Licenciamento — auditoria e implementação
+## Licenciamento — estado implementado
 
-A auditoria encontrou uma base existente de autenticação, validade server-side, entitlements, SQLite, `/licenses/me`, autorização do `/optimize` e PIX sandbox. O trabalho novo foi acoplado a essa base sem substituir o núcleo funcional.
+A base existente de autenticação, validade server-side, entitlements, SQLite, `/licenses/me`, autorização do `/optimize` e PIX sandbox foi preservada.
 
-### Núcleo comercial implementado
+### Núcleo comercial
 
 - `LicenseStatus`: `GERADA`, `DISPONIVEL`, `ATIVA`, `EXPIRADA`, `SUSPENSA`, `REVOGADA`.
-- `license_key` de alta entropia, separado do `license_id` interno.
-- plano, ativação, renovação, contador de renovações e último acesso.
+- `license_key` de alta entropia separado do `license_id` interno.
+- plano, ativação, renovação, contador e último acesso.
 - `effective_status()` dependente do relógio do servidor.
-- validação de limites de entitlement.
-- `LicenseEvent` imutável e repositório de eventos em memória.
+- `LicenseEvent` imutável e persistência de histórico.
 - `AccountRole`: `USER`/`ADMIN`.
 
-### Persistência/migração implementada
+### Persistência e migração
 
-`backend/src/otimizer_api/persistence.py` agora:
+- role, chave, estado, plano, ativação, renovação e último acesso persistidos.
+- índice único para `license_key`.
+- migração aditiva de schema legado sem apagar dados existentes.
+- tabela `license_events` persistente.
 
-- persiste `Account.role`;
-- persiste `license_key`, status, plano, ativação, renovação, contador e último acesso;
-- cria índice único para `license_key`;
-- cria `license_events` persistente com índice por licença/data;
-- lê e grava todos os novos campos;
-- mantém o schema legado por migração aditiva;
-- preenche chaves ausentes de licenças legadas antes de aplicar unicidade;
-- preserva os dados antigos em vez de recriar/apagar tabelas;
-- mantém autenticação, `/licenses/me`, autorização de rota e PIX sandbox na mesma arquitetura;
-- settlement PIX incrementa renovação e mantém a licença ativa de forma persistida.
+### Dispositivos e binding — milestone concluído
 
-### Testes adicionados
+`backend/src/otimizer_api/devices.py` agora contém:
 
-`backend/tests/test_license_lifecycle_primitives.py` cobre o núcleo de estados/chave/eventos.
+- `Device` com vínculo a conta/licença, timestamps e revogação;
+- hash SHA-256 do segredo da instalação; segredo bruto não é persistido;
+- `InMemoryDeviceRepository` para testes;
+- `SQLiteDeviceRepository` para persistência real;
+- índice único por `(license_id, device_key_hash)`;
+- `DeviceBindingService` como autoridade server-side;
+- reuso do mesmo dispositivo sem consumir slot adicional;
+- enforcement de `max_devices`;
+- revogação de dispositivo;
+- bloqueio para licença expirada, suspensa ou revogada;
+- capacidade + inserção protegidas pela mesma transação SQLite (`BEGIN IMMEDIATE`), reduzindo risco de corrida no limite;
+- eventos de registro, reuso, limite e revogação quando o repositório de eventos é fornecido.
 
-`backend/tests/test_persistence_licensing_migration.py` cobre:
+### Testes
 
-- persistência de role administrativo;
-- persistência dos campos comerciais;
-- unicidade de `license_key` no SQLite;
-- persistência e ordenação do histórico;
-- migração de banco legado sem perda dos dados essenciais.
+`backend/tests/test_devices.py` cobre:
 
-## Commits recentes
+- hash do segredo;
+- primeiro dispositivo;
+- limite de dispositivos;
+- reuso sem consumir slot;
+- licença suspensa/expirada/revogada;
+- revogação liberando capacidade;
+- persistência entre instâncias do repositório;
+- enforcement no SQLite.
 
-- `3058a0fd50d70901d82cd02e82900673db944856` — núcleo comercial da licença.
-- `6b1a2f4c6db0fc15904c4835bbce234dbbbcdeab` — roles de conta.
-- `0f2fe7331f91015068f04269517b443f8e3f6ad8` — testes do núcleo.
-- `671c2592cef433422584296756c0e5b604ae000f` — documentação inicial do milestone.
-- `c7b538b0efdd95f6b6bc931fc7aef44c7db3a438` — handoff do milestone inicial.
-- `a351e8eb343293a40c6a00d2c3999eff8bd6b14c` — persistência comercial/migração.
-- `9cbf64e30ceb3fc0afb44fe1fe5763c14458a138` — testes de migração/persistência.
-- `81a4a2393ca7ca14d87504bba778ad06a6f125cb` — roadmap atualizado.
+## Commits deste avanço
+
+- `3947db7883007d6e4eb64a4a4fcec3fae3356218` — primeiro núcleo de device binding.
+- `7f348fb2712259fe92d23086a65bbd1feb8590f2` — persistência e enforcement SQLite.
+- `7c0dc614aabadb358240fb2d696d04a90eec0abc` — testes de dispositivos.
+- `3306071e476a59b058e4017264f5ca3812596d6a` — roadmap atualizado.
+- este commit — handoff atualizado.
 
 ## Validação e ressalva
 
-As alterações foram gravadas diretamente no `main` pelo GitHub e os pushes acionaram CI. A execução local não está disponível neste ambiente; portanto, os novos testes não devem ser apresentados como executados localmente. A situação dos workflows deve ser verificada no GitHub antes de declarar a suíte verde.
+As alterações estão no `main`. A execução local não está disponível neste ambiente. Os workflows/statuses do commit final ainda não retornaram resultados associados; portanto, não declarar a suíte verde sem confirmação posterior do GitHub Actions.
 
 ## Próxima etapa obrigatória
 
-**Dispositivos e binding de licença.** Implementar, testar e revisar:
+**Serviço transacional completo do ciclo de vida da licença.** Implementar com regras explícitas e atomicidade:
 
-1. entidade persistente de dispositivo com identificador seguro, conta/licença e timestamps;
-2. registro/ativação do dispositivo no backend;
-3. enforcement de `max_devices` no servidor;
-4. impedir que alteração no APK ou relógio local contorne o limite;
-5. eventos de registro, vinculação, desvinculação e rejeição;
-6. testes de primeiro dispositivo, limite, excesso, reuso, concorrência e persistência.
+1. geração segura da licença;
+2. disponibilidade sem ativação automática;
+3. ativação por chave vinculada à conta/dispositivo;
+4. renovação preservando histórico;
+5. suspensão e reativação conforme regra administrativa;
+6. revogação permanente, sem reativação trivial;
+7. expiração baseada exclusivamente no servidor;
+8. evento de auditoria para cada transição;
+9. proteção contra concorrência e repetição de requisições.
 
 Depois:
 
-`serviço transacional de ciclo de vida → endpoints admin → painel → segurança adversarial → PIX produção → backup/restore → produção/VPS`.
+`endpoints admin → painel → segurança adversarial → Android integrado ao binding → PIX produção → backup/restore → VPS/produção`.
 
 ## Regras de continuidade
 
