@@ -458,3 +458,14 @@ app = create_app(
     payment_service=_payment_service,
     location_provider=_location_provider,
 )
+
+
+from otimizer_api.admin_api import register_admin_routes
+from otimizer_api.devices import SQLiteDeviceRepository
+from otimizer_api.licensing import LicenseLifecycleService
+from otimizer_api.persistence import SQLiteLicenseEventRepository
+
+_license_events = SQLiteLicenseEventRepository(_database)
+_license_lifecycle = LicenseLifecycleService(_license_authorizer.repository, _license_events)
+_device_repository = SQLiteDeviceRepository(_database)
+register_admin_routes(app, auth_service=_auth_service, licenses=_license_authorizer.repository, events=_license_events, lifecycle=_license_lifecycle, devices=_device_repository)
