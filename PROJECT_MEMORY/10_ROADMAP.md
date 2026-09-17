@@ -20,7 +20,7 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida e API administrativa protegida implementados; painel e hardening ainda pendentes.**
+**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida e painel web implementados; hardening e produção ainda pendentes.**
 
 Milestones implementados:
 
@@ -44,16 +44,17 @@ Milestones implementados:
 - geração, consulta, ativação, renovação, suspensão, reativação e revogação por API;
 - listagem/detalhes/histórico de licenças;
 - listagem e revogação de dispositivos;
-- respostas administrativas sem expor `device_key_hash`/segredos de instalação;
-- testes de autenticação, autorização USER vs ADMIN, ciclo de vida, histórico e dispositivos.
+- painel administrativo dedicado em `frontend/admin.html`, com login ADMIN, métricas, filtros, geração, detalhes, ciclo de vida, dispositivos e histórico;
+- navegação para administração no app principal somente para contas `ADMIN`;
+- CI frontend ampliado para validar o novo painel;
+- respostas administrativas sem expor segredos de instalação.
 
 ### Próxima subfase do licenciamento
 
-1. Painel administrativo real sobre a API protegida.
-2. Segurança adversarial dos endpoints, abuso, concorrência e revisão de atomicidade licença + auditoria.
-3. Integração Android do binding com o fluxo real de login/licença.
-4. PIX de produção com provedor e webhook autenticado.
-5. Backup/restauração do licenciamento com teste real de restore.
+1. Segurança adversarial dos endpoints, abuso, replay, manipulação de chave, concorrência e revisão da atomicidade licença + auditoria.
+2. Integração Android do binding com o fluxo real de login/licença.
+3. PIX de produção com provedor e webhook autenticado.
+4. Backup/restauração do licenciamento com teste real de restore.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
