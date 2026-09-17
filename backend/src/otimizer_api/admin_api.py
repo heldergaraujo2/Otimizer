@@ -1,4 +1,5 @@
 """Protected administrative API for commercial licensing operations."""
+# Administrative endpoints are intentionally isolated from ordinary user routes.
 from __future__ import annotations
 
 from datetime import datetime, timedelta, timezone
