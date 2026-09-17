@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Otimizer — Administração</title>
+  <link rel="stylesheet" href="admin.css">
+</head>
+<body>
+  <main class="admin-shell">
+    <header class="topbar">
+      <div><span class="eyebrow">OTIMIZER</span><h1>Administração de licenças</h1></div>
+      <div class="top-actions"><span id="status" class="status">Verificando acesso…</span><a href="index.html">Voltar ao app</a></div>
+    </header>
+
+    <section id="login-panel" class="panel">
+      <h2>Acesso administrativo</h2>
+      <p>Entre com uma conta com perfil ADMIN. O backend é a autoridade de autorização.</p>
+      <form id="login-form" class="form-grid">
+        <label>E-mail<input id="email" type="email" autocomplete="email" required></label>
+        <label>Senha<input id="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary" type="submit">Entrar</button>
+      </form>
+      <p id="login-error" class="error" hidden></p>
+    </section>
+
+    <section id="admin-panel" hidden>
+      <div class="toolbar panel">
+        <div><strong id="admin-email">—</strong><span id="admin-role">ADMIN</span></div>
+        <button id="logout" class="secondary">Sair</button>
+      </div>
+
+      <div id="metrics" class="metrics"></div>
+
+      <section class="panel">
+        <div class="section-heading"><div><h2>Licenças</h2><p>Gerencie o ciclo comercial sem acesso direto ao banco.</p></div><button id="refresh" class="secondary">Atualizar</button></div>
+        <div class="filters">
+          <label>Conta<input id="filter-account" placeholder="ID da conta"></label>
+          <label>Status<select id="filter-status"><option value="">Todos</option><option>GERADA</option><option>DISPONIVEL</option><option>ATIVA</option><option>EXPIRADA</option><option>SUSPENSA</option><option>REVOGADA</option></select></label>
+        </div>
+        <div id="licenses" class="license-list"></div>
+      </section>
+
+      <section id="details" class="panel" hidden>
+        <div class="section-heading"><h2>Detalhes da licença</h2><button id="close-details" class="icon">×</button></div>
+        <div id="license-details"></div>
+        <div id="license-actions" class="actions"></div>
+        <div class="subsection"><h3>Dispositivos</h3><div id="devices"></div></div>
+        <div class="subsection"><h3>Histórico de auditoria</h3><div id="history"></div></div>
+      </section>
+
+      <section class="panel">
+        <div class="section-heading"><div><h2>Gerar licença</h2><p>A chave comercial é criada no backend e não depende do frontend.</p></div></div>
+        <form id="generate-form" class="form-grid">
+          <label>ID da conta<input id="gen-account" required></label>
+          <label>Plano<input id="gen-plan" value="default" required></label>
+          <label>Duração (dias)<input id="gen-duration" type="number" min="1" max="3650" value="30" required></label>
+          <label>Máx. dispositivos<input id="gen-devices" type="number" min="1" max="1000" value="1" required></label>
+          <label>Máx. rotas/dia<input id="gen-routes" type="number" min="1" placeholder="Sem limite"></label>
+          <label>Preço (centavos)<input id="gen-price" type="number" min="0" value="0" required></label>
+          <label class="check"><input id="gen-optimization" type="checkbox" checked> Otimização de rota</label>
+          <button class="primary" type="submit">Gerar licença</button>
+        </form>
+        <p id="generate-message" class="message" hidden></p>
+      </section>
+    </section>
+  </main>
+  <script src="runtime-config.js"></script>
+  <script src="admin.js"></script>
+</body>
+</html>
