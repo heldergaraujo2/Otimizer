@@ -73,8 +73,7 @@ def register_admin_routes(api, *, auth_service: AuthenticationService, licenses:
         occurred=datetime.now(timezone.utc); event=create_license_event(record.license_id,"GENERATED",occurred,actor_account_id=admin.account_id,new_status=LicenseStatus.GENERATED)
         atomic=getattr(licenses,"save_with_event",None)
         if callable(atomic): atomic(record,event)
-        else:
-            licenses.save(record); events.append(event)
+        else: licenses.save(record); events.append(event)
         return _serialize_license(record)
 
     @api.get("/admin/licenses")
@@ -124,7 +123,13 @@ def register_admin_routes(api, *, auth_service: AuthenticationService, licenses:
         admin=require_admin(authorization); device=devices.get(device_id)
         if device is None: raise HTTPException(status_code=404,detail="Device not found")
         if device.revoked_at is not None: raise HTTPException(status_code=409,detail="Device is already revoked")
-        revoked=devices.revoke(device_id,datetime.now(timezone.utc))
-        if revoked is None: raise HTTPException(status_code=404,detail="Device not found")
-        events.append(create_license_event(device.license_id,"DEVICE_REVOKED_BY_ADMIN",datetime.now(timezone.utc),actor_account_id=admin.account_id,metadata_json=f'{{"device_id":"{device_id}"}}'))
+        occurred=datetime.now(timezone.utc)
+        event=create_license_event(device.license_id,"DEVICE_REVOKED_BY_ADMIN",occurred,actor_account_id=admin.account_id,metadata_json=f'{{"device_id":"{device_id}"}}')
+        atomic=getattr(devices,"revoke_with_event",None)
+        if callable(atomic):
+            revoked=atomic(device_id,occurred,event)
+        else:
+            revoked=devices.revoke(device_id,occurred)
+            if revoked is not None: events.append(event)
+        if revoked is None: raise HTTPException(status_code=404,detail="Device not found or already revoked")
         return _serialize_device(revoked)
