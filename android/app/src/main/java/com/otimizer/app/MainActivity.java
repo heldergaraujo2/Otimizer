@@ -55,6 +55,8 @@ public class MainActivity extends Activity {
         settings.setAllowContentAccess(false);
         settings.setBuiltInZoomControls(false);
         settings.setDisplayZoomControls(false);
+        // The first Android test connects the HTTPS WebView shell to a LAN HTTP backend.
+        settings.setMixedContentMode(WebSettings.MIXED_CONTENT_ALWAYS_ALLOW);
         settings.setUserAgentString(settings.getUserAgentString() + " OtimizerAndroid/0.1.0");
 
         WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
