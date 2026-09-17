@@ -19,6 +19,7 @@ NOW = datetime(2026, 9, 17, 12, tzinfo=timezone.utc)
 
 
 def make_license(status=LicenseStatus.ACTIVE, *, account_id="acct-1", expires=NOW + timedelta(days=30), max_devices=1):
+    revoked_at = NOW if status is LicenseStatus.REVOKED else None
     return License(
         license_id="lic-1",
         account_id=account_id,
@@ -26,6 +27,7 @@ def make_license(status=LicenseStatus.ACTIVE, *, account_id="acct-1", expires=NO
         expires_at=expires,
         entitlements=Entitlements(max_devices=max_devices),
         status=status,
+        revoked_at=revoked_at,
     )
 
 
@@ -51,16 +53,6 @@ def test_tampering_with_key_does_not_change_authoritative_license_state():
 
 def test_revoke_is_terminal_even_after_expiration():
     record = make_license(status=LicenseStatus.REVOKED, expires=NOW - timedelta(seconds=1))
-    record = License(
-        record.license_id,
-        record.account_id,
-        record.starts_at,
-        record.expires_at,
-        record.entitlements,
-        revoked_at=NOW,
-        license_key=record.license_key,
-        status=LicenseStatus.REVOKED,
-    )
     repository = InMemoryLicenseRepository([record])
     service = LicenseLifecycleService(repository, InMemoryLicenseEventRepository())
     try:
