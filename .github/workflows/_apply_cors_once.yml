@@ -1,0 +1,39 @@
+name: Internal one-time CORS patch
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Apply minimal CORS patch
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("backend/src/otimizer_api/main.py")
+          text = path.read_text(encoding="utf-8")
+          old = 'return ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:8080"]'
+          new = 'return ["http://localhost:3000", "http://localhost:5173", "http://localhost:8080", "http://127.0.0.1:8080", "https://appassets.androidplatform.net"]'
+          if old not in text:
+              print("CORS patch already applied; nothing to do")
+              raise SystemExit(0)
+          if text.count(old) != 1:
+              raise SystemExit(f"Expected exactly one CORS default line, found {text.count(old)}")
+          path.write_text(text.replace(old, new), encoding="utf-8")
+          PY
+          git diff --check
+          git diff -- backend/src/otimizer_api/main.py
+      - name: Commit patch if needed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if git diff --quiet -- backend/src/otimizer_api/main.py; then exit 0; fi
+          git add backend/src/otimizer_api/main.py
+          git commit -m "fix: allow Android WebView origin by default"
+          git push origin HEAD:main
