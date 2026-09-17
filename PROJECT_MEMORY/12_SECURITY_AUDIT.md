@@ -20,6 +20,7 @@ Revisão da camada comercial do OTIMIZER após a implementação de estados form
 - Segredo de instalação não é persistido em claro no backend; somente hash SHA-256 é armazenado.
 - Endpoints administrativos exigem sessão válida e role ADMIN.
 - Respostas administrativas não expõem o hash do segredo de dispositivo.
+- Usuários comuns não podem consultar ou alterar recursos administrativos.
 - Android gera segredo por instalação e o protege com Android Keystore; o backend recebe a prova necessária para binding e não armazena o segredo bruto.
 - `/optimize` e `/optimize-manual` podem exigir `X-Otimizer-Device-ID` quando o repositório de dispositivos está ativo.
 - Dispositivo revogado é rejeitado server-side mesmo com licença ativa.
@@ -35,6 +36,8 @@ Isso **não equivale a integração Pix de produção**. Falta PSP real, contrat
 O HEAD auditado `081b974aca5a0855e08be565a300c1eb52442817` possui uma execução observável do workflow `Frontend tests` (run `35243638706`) concluída com `success`, incluindo validação de sintaxe JavaScript e todos os testes frontend.
 
 Os workflows Backend, Importer e Android não executaram nesse push documental devido aos filtros de caminho configurados. Assim, não há evidência nova dessas suítes no HEAD auditado e elas não são declaradas verdes neste ciclo.
+
+O HEAD documental posterior desta continuidade (`c030ff50c5d8ba5183e633e15e72f9c45a5742c3`) acionou novamente `Frontend tests`; a execução estava `queued` no momento da última verificação. Portanto, seu resultado ainda não é declarado.
 
 ## Limitações assumidas
 
