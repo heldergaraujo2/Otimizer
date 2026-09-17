@@ -25,48 +25,36 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - navegação para o painel no app principal somente para `ADMIN`;
 - CI frontend inclui sintaxe e testes do painel.
 
-## Painel administrativo — concluído nesta etapa
+## Segurança adversarial — concluído nesta iteração
 
-Arquivos:
+Foi criado `backend/tests/test_licensing_security_adversarial.py` com cobertura de:
 
-- `frontend/admin.html`
-- `frontend/admin.js`
-- `frontend/admin.css`
-- `frontend/tests/admin-panel.test.js`
+- chave comercial não derivada do ID interno;
+- tentativa de adulteração da chave sem mutação do registro autoritativo;
+- revogação terminal;
+- expiração server-side de sessão e rejeição de replay após expiração;
+- segredo de dispositivo persistido somente como hash;
+- concorrência de oito tentativas simultâneas contra `max_devices=1` em SQLite, garantindo somente um binding ativo.
 
-Capacidades:
+## Validação CI
 
-- login administrativo e validação server-side de `ADMIN`;
-- métricas por estado;
-- filtros por conta/status;
-- listagem de licenças;
-- geração de licença;
-- visualização de chave, plano, conta, validade, preço, entitlements e renovações;
-- ativar, renovar, suspender, reativar e revogar;
-- histórico de auditoria com administrador, horário e motivo;
-- listar e revogar dispositivos;
-- ausência de `device_key_hash`/segredo de instalação no frontend;
-- mensagens e confirmações para operações destrutivas.
+O commit desta suíte disparou os workflows do GitHub Actions. No momento do registro, o workflow de backend estava `in_progress` e o frontend estava `queued`; portanto, não declarar suíte verde até observar a conclusão.
 
-`/auth/login` e `/auth/me` agora retornam `role`, permitindo que o frontend principal mostre o acesso administrativo somente para contas `ADMIN`.
+## Ressalva crítica antes de produção
 
-## Validação e ressalvas
+A atomicidade completa de **licença + auditoria** ainda não está concluída. O `LicenseLifecycleService` atualmente salva a licença e depois registra o evento em operações separadas. A próxima implementação deve colocar mudança de estado e evento na mesma transação e incluir teste de rollback para impedir estado comercial sem trilha de auditoria.
 
-A suíte local não está disponível neste ambiente. O workflow de backend foi observado avançando até a instalação do backend no HEAD anterior; não declarar toda a suíte verde sem conclusão observável. O workflow frontend foi atualizado para validar `admin.js` e o novo teste.
-
-Ressalva importante antes de produção: algumas transições do `LicenseLifecycleService` ainda salvam a licença e registram o evento em operações separadas. A atomicidade licença + auditoria será tratada na revisão de segurança/concorrência.
+Também devem ser concluídos os testes de abuso/isolamento dos endpoints administrativos e a revisão de rate limiting aplicável.
 
 ## Próxima etapa obrigatória
 
-**Segurança adversarial e concorrência do licenciamento**, incluindo:
+**Hardening transacional do licenciamento**, nesta ordem:
 
-1. replay/manipulação de chave;
-2. abuso dos endpoints administrativos;
-3. concorrência em geração/ativação/renovação/revogação;
-4. atomicidade licença + auditoria;
-5. testes de enumeração/vazamento e limites;
-6. revisão dos tokens/sessões e rate limiting aplicável;
-7. só depois, integração Android do binding.
+1. transação única licença + evento;
+2. rollback quando o evento falhar;
+3. conflitos concorrentes em ativação/renovação/revogação;
+4. abuso, enumeração, isolamento entre contas e vazamento nos endpoints administrativos;
+5. somente depois, integração Android do binding.
 
 ## Regras de continuidade
 
