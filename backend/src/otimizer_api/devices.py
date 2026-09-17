@@ -1,0 +1,122 @@
+"""Server-side device binding and license device-limit enforcement."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from datetime import datetime, timezone
+from hashlib import sha256
+from secrets import token_urlsafe
+from typing import Protocol
+
+from .licensing import License, LicenseEvent, LicenseEventRepository, LicenseRepository, LicenseStatus, create_license_event
+
+
+@dataclass(frozen=True)
+class Device:
+    device_id: str
+    account_id: str
+    license_id: str
+    device_key_hash: str
+    created_at: datetime
+    last_seen_at: datetime
+    revoked_at: datetime | None = None
+
+    @property
+    def active(self) -> bool:
+        return self.revoked_at is None
+
+
+class DeviceRepository(Protocol):
+    def register(self, device: Device, max_devices: int) -> tuple[bool, Device | None, str]: ...
+    def get(self, device_id: str) -> Device | None: ...
+    def list_for_license(self, license_id: str, active_only: bool = True) -> list[Device]: ...
+    def revoke(self, device_id: str, revoked_at: datetime) -> Device | None: ...
+
+
+class InMemoryDeviceRepository:
+    def __init__(self, devices: list[Device] | None = None) -> None:
+        self._devices = {device.device_id: device for device in devices or []}
+
+    def register(self, device: Device, max_devices: int) -> tuple[bool, Device | None, str]:
+        existing = next((item for item in self._devices.values() if item.license_id == device.license_id and item.device_key_hash == device.device_key_hash and item.active), None)
+        if existing is not None:
+            refreshed = Device(existing.device_id, existing.account_id, existing.license_id, existing.device_key_hash, existing.created_at, device.last_seen_at, None)
+            self._devices[existing.device_id] = refreshed
+            return True, refreshed, "DEVICE_REUSED"
+        active_count = sum(1 for item in self._devices.values() if item.license_id == device.license_id and item.active)
+        if active_count >= max_devices:
+            return False, None, "DEVICE_LIMIT_REACHED"
+        self._devices[device.device_id] = device
+        return True, device, "DEVICE_REGISTERED"
+
+    def get(self, device_id: str) -> Device | None:
+        return self._devices.get(device_id)
+
+    def list_for_license(self, license_id: str, active_only: bool = True) -> list[Device]:
+        return [item for item in self._devices.values() if item.license_id == license_id and (not active_only or item.active)]
+
+    def revoke(self, device_id: str, revoked_at: datetime) -> Device | None:
+        device = self._devices.get(device_id)
+        if device is None:
+            return None
+        updated = Device(device.device_id, device.account_id, device.license_id, device.device_key_hash, device.created_at, device.last_seen_at, _utc(revoked_at))
+        self._devices[device_id] = updated
+        return updated
+
+
+class DeviceBindingService:
+    """Binds installations to an active license; the backend is authoritative."""
+
+    def __init__(self, licenses: LicenseRepository, devices: DeviceRepository, events: LicenseEventRepository | None = None) -> None:
+        self.licenses = licenses
+        self.devices = devices
+        self.events = events
+
+    def register(self, account_id: str, license_id: str, device_secret: str, now: datetime | None = None) -> tuple[bool, Device | None, str]:
+        current = _utc(now)
+        if not account_id.strip() or not device_secret.strip():
+            return False, None, "INVALID_DEVICE_CREDENTIAL"
+        license_record = self.licenses.get_by_id(license_id)
+        if license_record is None or license_record.account_id != account_id:
+            return False, None, "LICENSE_NOT_FOUND"
+        if not license_record.is_active(current):
+            return False, None, _license_error(license_record, current)
+        device_key_hash = hash_device_secret(device_secret)
+        device = Device(token_urlsafe(18), account_id, license_id, device_key_hash, current, current)
+        allowed, bound, code = self.devices.register(device, license_record.entitlements.max_devices)
+        if self.events is not None:
+            event = create_license_event(license_id, code, current, actor_account_id=account_id, new_status=license_record.status, metadata_json='{"device_binding":true}')
+            self.events.append(event)
+        return allowed, bound, code
+
+    def revoke(self, account_id: str, device_id: str, now: datetime | None = None) -> bool:
+        current = _utc(now)
+        device = self.devices.get(device_id)
+        if device is None or device.account_id != account_id:
+            return False
+        revoked = self.devices.revoke(device_id, current)
+        if revoked is None:
+            return False
+        if self.events is not None:
+            self.events.append(create_license_event(device.license_id, "DEVICE_REVOKED", current, actor_account_id=account_id, metadata_json=f'{{"device_id":"{device_id}"}}'))
+        return True
+
+
+def hash_device_secret(device_secret: str) -> str:
+    if not device_secret.strip():
+        raise ValueError("device_secret must not be empty")
+    return sha256(device_secret.encode("utf-8")).hexdigest()
+
+
+def _license_error(license_record: License, now: datetime) -> str:
+    status = license_record.effective_status(now)
+    return {
+        LicenseStatus.EXPIRED: "LICENSE_EXPIRED",
+        LicenseStatus.SUSPENDED: "LICENSE_SUSPENDED",
+        LicenseStatus.REVOKED: "LICENSE_REVOKED",
+    }.get(status, "LICENSE_NOT_ACTIVE")
+
+
+def _utc(value: datetime | None) -> datetime:
+    current = value or datetime.now(timezone.utc)
+    return current.replace(tzinfo=timezone.utc) if current.tzinfo is None else current.astimezone(timezone.utc)
