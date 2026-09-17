@@ -66,7 +66,7 @@ class InMemoryDeviceRepository:
 
 
 class SQLiteDeviceRepository:
-    """Durable repository; the capacity check and insert happen in one transaction."""
+    """Durable repository; capacity changes and audited revocation can be transactional."""
 
     def __init__(self, database) -> None:
         self.database = database
@@ -118,6 +118,16 @@ class SQLiteDeviceRepository:
             connection.execute("UPDATE devices SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL", (_iso(revoked_at), device_id))
         return self.get(device_id)
 
+    def revoke_with_event(self, device_id: str, revoked_at: datetime, event: LicenseEvent) -> Device | None:
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE device_id=?", (device_id,)).fetchone()
+            if row is None or row["revoked_at"] is not None:
+                return None
+            connection.execute("UPDATE devices SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL", (_iso(revoked_at), device_id))
+            connection.execute("INSERT INTO license_events(event_id,license_id,action,occurred_at,actor_account_id,previous_status,new_status,reason,metadata_json) VALUES (?,?,?,?,?,?,?,?,?)", (event.event_id,event.license_id,event.action,_iso(event.occurred_at),event.actor_account_id,event.previous_status.value if event.previous_status else None,event.new_status.value if event.new_status else None,event.reason,event.metadata_json))
+            return _device_from_row(row, last_seen_at=_parse(row["last_seen_at"]))
+
 
 class DeviceBindingService:
     """Binds installations to an active license; the backend is authoritative."""
@@ -147,11 +157,15 @@ class DeviceBindingService:
         device = self.devices.get(device_id)
         if device is None or device.account_id != account_id:
             return False
+        event = create_license_event(device.license_id, "DEVICE_REVOKED", current, actor_account_id=account_id, metadata_json=f'{{"device_id":"{device_id}"}}')
+        atomic = getattr(self.devices, "revoke_with_event", None)
+        if callable(atomic):
+            return atomic(device_id, current, event) is not None
         revoked = self.devices.revoke(device_id, current)
         if revoked is None:
             return False
         if self.events is not None:
-            self.events.append(create_license_event(device.license_id, "DEVICE_REVOKED", current, actor_account_id=account_id, metadata_json=f'{{"device_id":"{device_id}"}}'))
+            self.events.append(event)
         return True
 
 
