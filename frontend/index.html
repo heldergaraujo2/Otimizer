@@ -14,7 +14,6 @@
       <div><span class="eyebrow">OTIMIZER</span><h1>Otimize sua rota</h1></div>
       <span id="status" class="status">Pronto</span>
     </header>
-
     <section class="panel account-panel">
       <h2>Conta e licença</h2>
       <div id="account-signed-out">
@@ -25,62 +24,26 @@
         <button id="login" class="primary">Entrar</button>
       </div>
       <div id="account-signed-in" hidden>
-        <div class="account-row"><span id="account-email">—</span><button id="logout" class="secondary">Sair</button></div>
+        <div class="account-row"><span id="account-email">—</span><div><a id="admin-link" class="secondary" href="admin.html" hidden>Administração</a><button id="logout" class="secondary">Sair</button></div></div>
         <div id="license-status" class="license-status">Consultando licença…</div>
         <button id="renew" class="secondary" hidden>Renovar com Pix</button>
       </div>
       <p id="account-error" class="error" role="alert" hidden></p>
     </section>
-
     <section class="panel setup-panel">
       <h2>1. Arquivo de entregas</h2>
-      <label class="file-drop" for="file-input">
-        <strong id="file-name">Selecione um arquivo .xlsx</strong>
-        <span>Os dados só são enviados quando você iniciar a otimização.</span>
-        <input id="file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet">
-      </label>
-      <div class="controls">
-        <label>Objetivo<select id="objective"><option value="time">Menor tempo</option><option value="distance">Menor distância</option></select></label>
-        <label>Retornar ao início<select id="return-to-start"><option value="false">Não</option><option value="true">Sim</option></select></label>
-      </div>
-      <details class="advanced"><summary>Opções avançadas</summary>
-        <div class="controls endpoints">
-          <label>Origem — latitude<input id="origin-lat" inputmode="decimal" placeholder="Opcional"></label>
-          <label>Origem — longitude<input id="origin-lon" inputmode="decimal" placeholder="Opcional"></label>
-          <label>Destino — latitude<input id="destination-lat" inputmode="decimal" placeholder="Opcional"></label>
-          <label>Destino — longitude<input id="destination-lon" inputmode="decimal" placeholder="Opcional"></label>
-        </div>
-      </details>
-      <button id="optimize" class="primary" disabled>Otimizar rota</button>
-      <p id="error" class="error" role="alert" hidden></p>
+      <label class="file-drop" for="file-input"><strong id="file-name">Selecione um arquivo .xlsx</strong><span>Os dados só são enviados quando você iniciar a otimização.</span><input id="file-input" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"></label>
+      <div class="controls"><label>Objetivo<select id="objective"><option value="time">Menor tempo</option><option value="distance">Menor distância</option></select></label><label>Retornar ao início<select id="return-to-start"><option value="false">Não</option><option value="true">Sim</option></select></label></div>
+      <details class="advanced"><summary>Opções avançadas</summary><div class="controls endpoints"><label>Origem — latitude<input id="origin-lat" inputmode="decimal" placeholder="Opcional"></label><label>Origem — longitude<input id="origin-lon" inputmode="decimal" placeholder="Opcional"></label><label>Destino — latitude<input id="destination-lat" inputmode="decimal" placeholder="Opcional"></label><label>Destino — longitude<input id="destination-lon" inputmode="decimal" placeholder="Opcional"></label></div></details>
+      <button id="optimize" class="primary" disabled>Otimizar rota</button><p id="error" class="error" role="alert" hidden></p>
     </section>
     <section id="result" hidden>
-      <div class="summary-grid">
-        <article><span>Entregas</span><strong id="delivery-count">—</strong></article>
-        <article><span>Paradas</span><strong id="stop-count">—</strong></article>
-        <article><span>Distância</span><strong id="distance">—</strong></article>
-        <article><span>Tempo</span><strong id="duration">—</strong></article>
-      </div>
-      <div class="coverage" id="coverage"></div>
-      <div id="pending-alert" class="pending-alert" role="alert" hidden></div>
-      <div id="map" class="map"></div>
-      <section class="panel stops-panel">
-        <div class="section-heading"><h2>Próximas paradas</h2><span id="pending"></span></div>
-        <div id="stops" class="stops"></div>
-      </section>
-      <section id="stop-detail" class="panel detail-panel" hidden>
-        <div class="section-heading"><h2 id="detail-title">Parada</h2><button id="close-detail" class="icon-button" aria-label="Fechar">×</button></div>
-        <div id="detail-content"></div>
-        <button id="next-stop" class="primary next-stop" hidden>SEGUIR PARA A PRÓXIMA</button>
-      </section>
+      <div class="summary-grid"><article><span>Entregas</span><strong id="delivery-count">—</strong></article><article><span>Paradas</span><strong id="stop-count">—</strong></article><article><span>Distância</span><strong id="distance">—</strong></article><article><span>Tempo</span><strong id="duration">—</strong></article></div>
+      <div class="coverage" id="coverage"></div><div id="pending-alert" class="pending-alert" role="alert" hidden></div><div id="map" class="map"></div>
+      <section class="panel stops-panel"><div class="section-heading"><h2>Próximas paradas</h2><span id="pending"></span></div><div id="stops" class="stops"></div></section>
+      <section id="stop-detail" class="panel detail-panel" hidden><div class="section-heading"><h2 id="detail-title">Parada</h2><button id="close-detail" class="icon-button" aria-label="Fechar">×</button></div><div id="detail-content"></div><button id="next-stop" class="primary next-stop" hidden>SEGUIR PARA A PRÓXIMA</button></section>
     </section>
   </main>
-  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-  <script src="runtime-config.js"></script>
-  <script src="app.js"></script>
-  <script src="route-safety.js"></script>
-  <script src="pending-ui.js"></script>
-  <script src="manual-route.js"></script>
-  <script src="address-autocomplete.js"></script>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script><script src="runtime-config.js"></script><script src="app.js"></script><script src="route-safety.js"></script><script src="pending-ui.js"></script><script src="manual-route.js"></script><script src="address-autocomplete.js"></script>
 </body>
 </html>
