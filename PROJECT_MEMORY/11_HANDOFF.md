@@ -26,11 +26,11 @@ Fluxo principal:
 - Uma parada problemática nunca deve derrubar a otimização das demais.
 - Quando a rua correta puder ser determinada com confiança suficiente, um ponto aproximado na rua é preferível a excluir a entrega.
 
-## Estado atual — validado no PC
+## Estado atual — validado no PC e Android
 
 ### Importação e otimização XLSX
 
-O usuário realizou teste real com **mais de 30 arquivos XLSX reais**.
+O usuário realizou testes reais com **mais de 30 arquivos XLSX reais no PC**.
 
 Resultado informado pelo usuário:
 
@@ -40,7 +40,23 @@ Resultado informado pelo usuário:
 - após a inclusão manual, a rota foi recalculada/reotimizada sem problemas;
 - o fluxo foi considerado **100% funcional conforme esperado**.
 
-Esse resultado deve ser tratado como validação funcional real já concluída, e não como hipótese.
+### Primeiro teste físico Android — APROVADO
+
+Em 17/09/2026, o usuário validou no celular Android um fluxo operacional real usando o APK do projeto e backend local acessível pela rede LAN.
+
+Fluxo validado com sucesso:
+
+`instalação do APK → login → importação de novo XLSX → otimização → rota manual → reotimização`
+
+Resultado informado pelo usuário:
+
+- login funcionou perfeitamente;
+- novo XLSX foi importado corretamente;
+- otimização automática funcionou corretamente;
+- rotas/paradas manuais também foram otimizadas corretamente;
+- a comunicação Android → backend foi confirmada em ambiente físico.
+
+Esse é o primeiro marco oficial de validação móvel do projeto. Ainda não equivale a aprovação para produção: faltam testes de campo mais amplos, estabilidade, segurança, backend remoto e atualização/distribuição do aplicativo.
 
 ### Localização cadastral / fallback
 
@@ -63,6 +79,8 @@ O usuário confirmou que:
 - o alfinete automático apareceu corretamente;
 - o comportamento funcionou perfeitamente.
 
+No Android, o fluxo de rota manual/reotimização também foi validado no primeiro teste físico.
+
 A posição automática é um ponto da geometria da rua, não uma alegação de que o ponto seja a porta do imóvel. O clique manual continua disponível para ajuste fino.
 
 ## Implementação relevante recente
@@ -79,19 +97,39 @@ Commits desta alteração:
 - `975e35f460d005af7bf94b350eb1b088c56b56a8` — proteção de conflito cadastral no runtime;
 - `d89648771ff00c4c2309d8fd80c2521b89edb8a6` — testes de conflito explícito de número/rua e preservação da resolução compatível.
 
+## Android / conectividade
+
+O Android usa um WebView com shell HTTPS local e pode apontar o frontend para o backend por URL configurável via bridge JavaScript.
+
+Correção aplicada para o primeiro teste físico:
+
+- `a176930a305b18c36390d1571e43ed7ac68805c7` — WebView permite mixed content necessário ao backend HTTP LAN durante o teste;
+- `90f89c962bfb2a8adecd4073ce234a707f69b802` — origem `https://appassets.androidplatform.net` adicionada ao CORS padrão do backend;
+- `2afae71939b50b4e5bd8ef0c3dd50be892f57d5e` — teste automatizado da origem CORS do Android.
+
+O problema que inicialmente produzia `OPTIONS /auth/login 400` foi eliminado, e o usuário confirmou login funcionando no APK.
+
+O workflow de APK também foi validado anteriormente com sucesso e gera `app-debug.apk` como artefato do GitHub Actions.
+
+## Sistema de atualização por patch
+
+Requisito oficial registrado em `PROJECT_MEMORY/12_UPDATE_SYSTEM.md`.
+
+Status: **PLANEJADO — NÃO IMPLEMENTAR AINDA**.
+
+Objetivo futuro: permitir que alterações compatíveis de frontend/conteúdo sejam distribuídas como patch sem exigir novo APK; mudanças nativas Android continuam exigindo novo APK. O futuro Update Manager deverá considerar versão, compatibilidade, checksum, rollback e fallback seguro.
+
 ## Auditoria automatizada atual
 
-No commit `d89648771ff00c4c2309d8fd80c2521b89edb8a6`, os três workflows do GitHub Actions executaram com sucesso:
+No commit `2afae71939b50b4e5bd8ef0c3dd50be892f57d5e`, Backend e Frontend foram executados pelo GitHub Actions e concluíram com sucesso:
 
-- Importer: **132 passed em 3.82s**;
-- Backend: **71 passed, 2 warnings em 3.43s**;
-- Frontend: **success**, incluindo validação de sintaxe e todos os testes frontend.
+- Backend: **success**;
+- Frontend: **success**;
+- o teste específico da origem CORS Android foi incluído e passou no workflow de frontend/backend correspondente.
 
-O Importer aumentou de 128 para 132 testes com a nova cobertura de conflito cadastral.
+A árvore `main` contém atualmente quatro workflows ativos: Android APK, Backend tests, Frontend tests e Importer tests. Não foram encontrados workflows temporários de patch na listagem atual de `.github/workflows`.
 
-Os warnings atuais conhecidos do Backend são de compatibilidade/depreciação em `starlette.testclient`/`httpx` e alias do `anyio`; não foram alterados nesta etapa porque não há evidência de falha funcional decorrente deles.
-
-Os workflows foram verificados diretamente no GitHub para o SHA `d89648771ff00c4c2309d8fd80c2521b89edb8a6`; não houve apenas inferência pelo estado do commit.
+A auditoria histórica anterior registrou **132 testes do Importer** e **71 do Backend**, com warnings de depreciação conhecidos no Backend. Esses números devem ser tratados como último resultado quantitativo explicitamente registrado, não como contagem inferida para qualquer execução posterior.
 
 ## Cobertura automatizada relevante
 
@@ -140,14 +178,18 @@ Os workflows foram verificados diretamente no GitHub para o SHA `d89648771ff00c4
 - preservação de 100/100 entregas no cenário isolado;
 - reotimização manual.
 
-### Frontend
+### Frontend / Android
 
 - autocomplete municipal;
 - alfinete municipal;
 - invalidação de seleção municipal obsoleta;
 - ajuste manual;
 - navegação;
-- pendências.
+- pendências;
+- login Android;
+- importação XLSX Android;
+- otimização Android;
+- rota manual/reotimização Android.
 
 ## Ambiente local conhecido
 
@@ -159,15 +201,17 @@ Python:
 
 `3.14.7`
 
-Backend:
+Backend para teste físico Android:
 
 ```powershell
 cd D:\Otimizer\Otimizer-main
 .\.venv\Scripts\Activate.ps1
-python -m uvicorn otimizer_api.main:app --host 127.0.0.1 --port 8000
+python -m uvicorn otimizer_api.main:app --host 0.0.0.0 --port 8000
 ```
 
-Frontend:
+O telefone utilizado no teste acessou o backend pela rede LAN do PC. A URL deve ser configurada conforme o IPv4 LAN atual do computador; não gravar IP de rede local como configuração de produção.
+
+Frontend PC:
 
 ```powershell
 cd D:\Otimizer\Otimizer-main
@@ -180,27 +224,31 @@ URL:
 
 ## Próxima fase
 
-A validação funcional básica, o teste real de mais de 30 XLSX e a primeira proteção concreta de conflito cadastral já foram concluídos com sucesso. A próxima etapa continua sendo **auditoria de robustez e preparação do produto**, sem recomeçar o projeto.
+A validação funcional básica no PC e o primeiro fluxo operacional físico Android já foram concluídos. O projeto entra agora em **auditoria de robustez, estabilização e preparação para testes de campo**, sem recomeçar o projeto.
 
 Prioridades restantes:
 
-1. verificar o estado atual completo do Git e consistência entre código/documentação;
-2. manter todas as suítes automatizadas verdes;
-3. auditar regressões em importer, backend, routing, optimization e frontend;
-4. auditar outros conflitos de evidência cadastral e casos de empate;
-5. auditar múltiplas pernas não roteáveis sem permitir falha da rota inteira;
-6. auditar repetibilidade/determinismo da otimização em cenários adicionais;
-7. auditar performance com arquivos maiores;
-8. revisar falhas de serviços externos e timeouts;
-9. revisar segurança/autenticação/licenciamento;
-10. manter README, documentação e `PROJECT_MEMORY` coerentes;
-11. somente depois avançar para novas capacidades de produto.
+1. auditar completamente a árvore Git e consistência entre código, documentação e artefatos;
+2. confirmar/registrar execução verde de todos os quatro workflows ativos no estado atual;
+3. auditar regressões em importer, backend, routing, optimization, frontend e Android;
+4. ampliar testes de conflitos cadastrais e casos de empate;
+5. ampliar testes de múltiplas pernas não roteáveis;
+6. ampliar testes de repetibilidade/determinismo;
+7. testar performance com XLSX maiores;
+8. revisar falhas, timeout e indisponibilidade de serviços externos;
+9. revisar segurança, autenticação, sessões e licenciamento;
+10. separar claramente configuração de desenvolvimento LAN da configuração de produção;
+11. preparar backend remoto/deploy e configuração segura do aplicativo;
+12. planejar distribuição do APK e assinatura de release;
+13. manter o sistema de atualização por patch planejado, sem implementá-lo prematuramente;
+14. manter README, documentação e `PROJECT_MEMORY` coerentes;
+15. produzir relatório final de aceitação antes de declarar produção.
 
 ## Próximo ajuste técnico
 
-O conflito explícito de número/rua que motivou a etapa atual está protegido e coberto por testes.
+O próximo trabalho deve privilegiar evidência e testes, não novas funcionalidades cosméticas.
 
-Não considerar a auditoria inteira concluída ainda. Continuar examinando a hierarquia de localização sem reduzir precisão nem criar associações inseguras.
+A validação Android já comprovou o caminho operacional principal, mas ainda não valida cenários de campo como perda de conexão, backend remoto, grandes cargas, permissões do aparelho, retomada do aplicativo, múltiplos dispositivos e segurança de produção.
 
 Depois de cada alteração significativa:
 
@@ -214,4 +262,4 @@ Nunca inventar execução, resultado, commit ou CI.
 
 Nunca declarar o projeto pronto somente porque os testes automatizados passaram.
 
-O objetivo agora é transformar a validação funcional já comprovada em uma base robusta e auditada para evolução do produto.
+O objetivo agora é transformar a validação funcional já comprovada no PC e Android em uma base robusta, segura e auditada para evolução do produto.
