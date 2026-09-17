@@ -20,7 +20,6 @@ Revisão da camada comercial do OTIMIZER após a implementação de estados form
 - Segredo de instalação não é persistido em claro no backend; somente hash SHA-256 é armazenado.
 - Endpoints administrativos exigem sessão válida e role ADMIN.
 - Respostas administrativas não expõem o hash do segredo de dispositivo.
-- Usuários comuns não podem consultar ou alterar recursos administrativos.
 - Android gera segredo por instalação e o protege com Android Keystore; o backend recebe a prova necessária para binding e não armazena o segredo bruto.
 - `/optimize` e `/optimize-manual` podem exigir `X-Otimizer-Device-ID` quando o repositório de dispositivos está ativo.
 - Dispositivo revogado é rejeitado server-side mesmo com licença ativa.
@@ -31,6 +30,12 @@ A camada atual de webhook Pix é provider-neutral e cobre HMAC-SHA256, timestamp
 
 Isso **não equivale a integração Pix de produção**. Falta PSP real, contrato de assinatura específico, endpoint ligado ao provedor, idempotência persistente, proteção contra dupla liquidação e homologação.
 
+## CI verificado nesta continuidade
+
+O HEAD auditado `081b974aca5a0855e08be565a300c1eb52442817` possui uma execução observável do workflow `Frontend tests` (run `35243638706`) concluída com `success`, incluindo validação de sintaxe JavaScript e todos os testes frontend.
+
+Os workflows Backend, Importer e Android não executaram nesse push documental devido aos filtros de caminho configurados. Assim, não há evidência nova dessas suítes no HEAD auditado e elas não são declaradas verdes neste ciclo.
+
 ## Limitações assumidas
 
 - O backend ainda não possui rate limiter distribuído próprio. Rate limiting de produção deve ser aplicado no gateway/VPS, com regras específicas para login e operações administrativas, mantendo proteção de aplicação quando necessário.
@@ -39,10 +44,12 @@ Isso **não equivale a integração Pix de produção**. Falta PSP real, contrat
 - Homologação física completa de binding, revogação, `max_devices`, reinstalação/restore e sessão expirada ainda depende de execução em dispositivo real.
 - Infraestrutura de produção (VPS, domínio, HTTPS, DB/OSRM remoto e observabilidade) ainda não está homologada.
 
-## Evidência de CI
+## Homologação Android
 
-Historicamente, o SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve Backend tests e Frontend tests concluídos com sucesso. Entretanto, o commit atual auditado não possui workflow run observável pela integração disponível. Portanto, não declarar a `main` atual verde sem nova evidência.
+Foi criada `docs/ANDROID_HOMOLOGATION.md` com matriz de 17 cenários. Todos permanecem pendentes de execução física até que sejam realizados em aparelho Android real.
+
+Nenhum resultado físico é inferido a partir do código ou do workflow de build.
 
 ## Próximo objetivo
 
-Executar a homologação física do Android sobre o binding já implementado. Em seguida, avançar para PSP Pix real e backup/restauração, sem inventar credenciais, resultados de testes ou infraestrutura.
+Executar a homologação física do Android sobre o binding já implementado. Em paralelo, podem ser preparados componentes provider-neutral de backup/restore e testes adicionais de segurança, sem declarar restore real nem Pix real concluídos.
