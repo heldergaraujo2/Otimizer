@@ -20,7 +20,7 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo, persistência, dispositivos e serviço de ciclo de vida implementados; API administrativa/painel ainda pendentes.**
+**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida e API administrativa protegida implementados; painel e hardening ainda pendentes.**
 
 Milestones implementados:
 
@@ -36,22 +36,24 @@ Milestones implementados:
 - enforcement server-side de `max_devices`;
 - reuso do mesmo dispositivo sem consumir slot;
 - revogação de dispositivo;
-- serviço transacional de domínio para ativação, renovação, suspensão, reativação, revogação e expiração;
-- transições inválidas bloqueadas;
-- revogação permanente;
+- serviço de ciclo de vida para ativação, renovação, suspensão, reativação, revogação e expiração;
+- transições inválidas bloqueadas e revogação permanente;
 - expiração baseada no relógio do servidor;
-- auditoria de cada transição;
-- testes do ciclo de vida.
+- auditoria de transições;
+- API administrativa protegida por `AccountRole.ADMIN`;
+- geração, consulta, ativação, renovação, suspensão, reativação e revogação por API;
+- listagem/detalhes/histórico de licenças;
+- listagem e revogação de dispositivos;
+- respostas administrativas sem expor `device_key_hash`/segredos de instalação;
+- testes de autenticação, autorização USER vs ADMIN, ciclo de vida, histórico e dispositivos.
 
 ### Próxima subfase do licenciamento
 
-1. Endpoints administrativos protegidos por `AccountRole.ADMIN`.
-2. Operações de geração, consulta, ativação, renovação, suspensão, reativação, revogação e dispositivos via API.
-3. Dashboard, listagem, detalhes e histórico administrativo.
-4. Segurança adversarial dos endpoints e testes de abuso/concorrência.
-5. Integração Android do binding com o fluxo real de login/licença.
-6. PIX de produção com provedor e webhook autenticado.
-7. Backup/restauração do licenciamento.
+1. Painel administrativo real sobre a API protegida.
+2. Segurança adversarial dos endpoints, abuso, concorrência e revisão de atomicidade licença + auditoria.
+3. Integração Android do binding com o fluxo real de login/licença.
+4. PIX de produção com provedor e webhook autenticado.
+5. Backup/restauração do licenciamento com teste real de restore.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
