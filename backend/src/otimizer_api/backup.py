@@ -66,6 +66,8 @@ def create_backup(database_path: str | Path, backup_path: str | Path) -> Path:
     destination = Path(backup_path)
     if source.resolve() == destination.resolve():
         raise BackupError("backup destination must differ from source database")
+    if not source.is_file():
+        raise BackupError("source database does not exist")
     destination.parent.mkdir(parents=True, exist_ok=True)
     manifest_path = destination.with_suffix(destination.suffix + ".json")
 
@@ -73,6 +75,7 @@ def create_backup(database_path: str | Path, backup_path: str | Path) -> Path:
         dir=destination.parent, prefix=f".{destination.name}.", suffix=".tmp", delete=False
     ) as temporary:
         temporary_path = Path(temporary.name)
+    manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
     try:
         with sqlite3.connect(source) as source_connection, sqlite3.connect(temporary_path) as target_connection:
             source_connection.backup(target_connection)
@@ -87,13 +90,13 @@ def create_backup(database_path: str | Path, backup_path: str | Path) -> Path:
             "tables": _counts(temporary_path),
         }
         os.replace(temporary_path, destination)
-        manifest_tmp = manifest_path.with_suffix(manifest_path.suffix + ".tmp")
         manifest_tmp.write_text(json.dumps(manifest, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         os.chmod(manifest_tmp, 0o600)
         os.replace(manifest_tmp, manifest_path)
         return destination
     except Exception:
         temporary_path.unlink(missing_ok=True)
+        manifest_tmp.unlink(missing_ok=True)
         raise
 
 
@@ -122,8 +125,8 @@ def validate_backup(backup_path: str | Path) -> dict[str, object]:
 def restore_backup(backup_path: str | Path, target_path: str | Path) -> Path:
     """Validate a backup and atomically restore it to a new SQLite path.
 
-    The target must not be the live source path. Existing target files are
-    replaced only after the validated snapshot has been copied and checked.
+    Existing target files are replaced only after the validated snapshot has
+    been copied and checked.
     """
     backup = Path(backup_path)
     target = Path(target_path)
@@ -147,3 +150,32 @@ def restore_backup(backup_path: str | Path, target_path: str | Path) -> Path:
     except Exception:
         temporary_path.unlink(missing_ok=True)
         raise
+
+
+def prune_backups(directory: str | Path, keep: int = 7, pattern: str = "*.db") -> list[Path]:
+    """Delete only validated backup snapshots beyond the retention count.
+
+    Invalid snapshots are retained for investigation instead of being silently
+    deleted. The paired manifest is removed only after its database is removed.
+    """
+    if keep < 1:
+        raise ValueError("keep must be at least 1")
+    root = Path(directory)
+    if not root.is_dir():
+        return []
+    candidates: list[tuple[Path, float]] = []
+    for path in root.glob(pattern):
+        if not path.is_file() or path.name.endswith(".tmp"):
+            continue
+        try:
+            validate_backup(path)
+        except BackupError:
+            continue
+        candidates.append((path, path.stat().st_mtime))
+    candidates.sort(key=lambda item: item[1], reverse=True)
+    removed: list[Path] = []
+    for path, _ in candidates[keep:]:
+        path.unlink()
+        path.with_suffix(path.suffix + ".json").unlink(missing_ok=True)
+        removed.append(path)
+    return removed
