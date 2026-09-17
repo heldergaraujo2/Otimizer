@@ -168,12 +168,9 @@ class LicenseLifecycleService:
         self._commit(updated, create_license_event(license_id, action, current, actor_account_id=actor_account_id, previous_status=record.status, new_status=new_status, reason=reason)); return updated
     def _commit(self, license_record: License, event: LicenseEvent) -> None:
         atomic = getattr(self.repository, "save_with_event", None)
-        try:
-            if callable(atomic): atomic(license_record, event)
-            else:
-                self.repository.save(license_record); self.events.append(event)
-        except LicenseConcurrencyError:
-            raise
+        if callable(atomic): atomic(license_record, event)
+        else:
+            self.repository.save(license_record); self.events.append(event)
     def _get(self, license_id: str) -> License:
         record = self.repository.get_by_id(license_id)
         if record is None: raise LicenseLifecycleError("license not found")
