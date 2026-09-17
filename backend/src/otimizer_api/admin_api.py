@@ -79,7 +79,7 @@ def register_admin_routes(api, *, auth_service: AuthenticationService, licenses:
         allowed, device, code=binding.register(account.account_id, payload.license_id.strip(), payload.device_secret, datetime.now(timezone.utc))
         if allowed and device is not None:
             return {"bound":True,"code":code,"device":_serialize_device(device)}
-        status=409 if code == "DEVICE_LIMIT_REACHED" else 403 if code.startswith("LICENSE_") else 422
+        status=409 if code == "DEVICE_LIMIT_REACHED" else 403 if code.startswith("LICENSE_") or code == "DEVICE_REVOKED" else 422
         raise HTTPException(status_code=status, detail=code)
 
     @api.post("/admin/licenses")
