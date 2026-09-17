@@ -4,9 +4,17 @@
 
 `heldergaraujo2/Otimizer`, branch `main`.
 
-## Estado atual
+## Estado verificado em 2026-09-17
 
-O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimização, backend, frontend e primeiro fluxo Android físico está validado conforme registros anteriores. O projeto está na etapa de robustez/produção e conclusão do sistema comercial de licenças.
+O repositório foi auditado antes de qualquer alteração. A `main` estava no commit `dab00fd7817300aec0dc750c68c552464e815554`, e a atualização documental desta auditoria foi aplicada em seguida no commit `70835fe4bfb7807b0c47bb3f925f3beb04aa6124`.
+
+O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimização, backend, frontend e primeiro fluxo Android físico está implementado. O projeto está na etapa de robustez/homologação e conclusão do sistema comercial.
+
+## Documentação encontrada
+
+Existem e foram consultados `PROJECT_MEMORY/00_IDENTITY.md`, `01_PRODUCT_VISION.md`, `02_REQUIREMENTS.md`, `08_CURRENT_STATE.md`, `10_ROADMAP.md`, `11_HANDOFF.md` e documentos relevantes de `docs/` (`REQUIREMENTS.md`, `ARCHITECTURE.md`, `XLSX_SPEC.md`).
+
+Os caminhos `PROJECT_MEMORY/03_ARCHITECTURE.md`, `04_ROUTING_ENGINE.md`, `05_OPTIMIZATION.md`, `06_XLSX_FORMAT.md`, `07_ROADMAP.md`, `09_DECISIONS.md` e `PROJECT_MEMORY/10_TESTS.md`, assim como `docs/ROADMAP.md` e `docs/TESTING.md`, não existem na `main` atual (GitHub retornou 404). Não foram recriados automaticamente, pois isso exigiria inventar conteúdo histórico. A arquitetura disponível em `docs/ARCHITECTURE.md`, o README e os demais registros atuais foram usados como fonte.
 
 ## Licenciamento — estado implementado
 
@@ -37,21 +45,20 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - navegador possui fallback com segredo aleatório persistido no armazenamento local;
 - `/optimize` e `/optimize-manual` aceitam `X-Otimizer-Device-ID`;
 - a aplicação global instancia `SQLiteDeviceRepository` e valida no servidor conta, dispositivo ativo e licença ativa antes de processar a rota;
-- revogação de dispositivo passa a impedir uso posterior mesmo com licença ativa;
+- revogação de dispositivo impede uso posterior mesmo com licença ativa;
 - testes específicos cobrem endpoint de binding e autorização da rota.
 
-## Segurança, atomicidade e concorrência — estado atual
+## Segurança, atomicidade e concorrência
 
-- `LicenseLifecycleService` centraliza o commit de transições e usa `save_with_event` quando o repositório durável oferece suporte transacional;
+- `LicenseLifecycleService` centraliza transições e usa `save_with_event` quando o repositório durável oferece suporte transacional;
 - `SQLiteLicenseRepository.save_with_event()` usa `BEGIN IMMEDIATE` e grava licença + evento na mesma transação;
 - falha na gravação do evento provoca rollback da mudança de licença;
 - `LicenseConcurrencyError` impede que uma operação baseada em leitura obsoleta sobrescreva uma transição concorrente;
 - ativações/suspensões/reativações/revogações/expirações validam o status anterior dentro da transação;
-- renovações também validam `renewal_count` e `expires_at` esperados;
-- `backend/tests/test_license_concurrency.py` força a corrida de leitura e verifica um único vencedor/evento em ativação, renovação e revogação;
+- renovações validam `renewal_count` e `expires_at` esperados;
+- testes concorrentes cobrem ativação, renovação e revogação;
 - revogação de dispositivo em SQLite pode persistir alteração + auditoria na mesma transação;
-- testes adversariais cobrem adulteração de chave, revogação terminal, replay de sessão, hash de segredo e concorrência de device binding;
-- endpoints administrativos exigem autenticação e `ADMIN`, com validação de payload e sem exposição do hash do dispositivo.
+- endpoints administrativos exigem autenticação e `ADMIN`, sem exposição do hash do dispositivo.
 
 ## Autenticação/sessões
 
@@ -64,7 +71,7 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 
 ## PIX — fundação de produção adicionada
 
-`backend/src/otimizer_api/pix_webhook.py` agora fornece primitives provider-neutral para autenticação de webhook:
+`backend/src/otimizer_api/pix_webhook.py` fornece primitives provider-neutral para autenticação de webhook:
 
 - HMAC-SHA256 calculado sobre timestamp + corpo bruto;
 - janela temporal configurável para rejeitar replay fora da tolerância;
@@ -76,23 +83,52 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 
 Esta etapa é somente a fundação de segurança. O Pix comercial **não deve ser considerado produção concluída** até que um PSP real seja escolhido/configurado, seu contrato de assinatura seja implementado no adaptador, o endpoint seja ligado à `PaymentService`, a idempotência de eventos seja persistida e a homologação real seja executada.
 
-## Validação CI
+## CI — estado real
 
-O SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve Backend tests e Frontend tests verdes após a correção do fixture adversarial.
+Os workflows existentes na `main` são:
 
-Durante a implementação do binding, o Backend tests do SHA `4af5d80d45a5547f72225c78d88ac5698a24b298` encontrou quatro falhas reais: três causadas por um binding SQL incompleto no novo insert de dispositivo e uma por mapeamento HTTP do estado `DEVICE_REVOKED`. Essas falhas foram corrigidas em `dcfcb2a4dc401dbaca38736adfbe0f686d950d29` e `a620a2399ff6e3b19be2db5d2043acee61e60031`.
+- Backend tests;
+- Frontend tests;
+- Importer tests;
+- Android APK.
 
-O Frontend tests do SHA `a620a2399ff6e3b19be2db5d2043acee61e60031` já concluiu `success`. Para os commits mais recentes deste ciclo, o conector GitHub não retornou workflow runs associados ao SHA de documentação final; portanto, não declarar CI verde sem nova execução observável.
+O SHA atual antes desta documentação (`dab00fd...`) não possui workflow run observável pela integração GitHub disponível. Portanto, **CI não está declarado verde**. A suíte local também não está disponível neste ambiente porque o checkout não é montado aqui.
 
-A suíte local continua não disponível neste ambiente porque o checkout não é montado aqui; a validação definitiva deste ciclo deve usar o GitHub Actions.
+O histórico recente registra Backend + Frontend verdes no SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` e correções posteriores de binding/CORS. Isso é evidência histórica, não substituto para validar a `main` atual.
 
-## Próxima etapa obrigatória
+## Android — estado e limite de validação
 
-1. Confirmar GitHub Actions após o novo teste de webhook e corrigir qualquer regressão.
-2. Executar teste físico Android de login → licença → binding → otimização; revogar dispositivo pelo painel e confirmar bloqueio; validar segundo dispositivo/max_devices, reinstalação/restore e sessão expirada.
-3. Selecionar/configurar PSP Pix real e implementar o adaptador + endpoint de webhook autenticado/idempotente.
-4. Implementar backup/restauração do licenciamento e executar teste real de restore.
-5. Avançar para VPS, HTTPS, OSRM e DB de produção.
+O código atual contém geração e proteção do segredo por Android Keystore e configuração de API. O workflow `android-apk.yml` constrói um APK **debug**, não um release comercial.
+
+Ainda é necessário executar em dispositivo real:
+
+1. login → licença → binding → otimização;
+2. revogar dispositivo no painel → confirmar bloqueio;
+3. segundo dispositivo → confirmar `max_devices`;
+4. reinstalação/restore → confirmar comportamento esperado do binding;
+5. sessão expirada → confirmar bloqueio/reautenticação;
+6. licença expirada/suspensa/revogada → confirmar bloqueio.
+
+Esses testes não podem ser inventados nem considerados executados apenas por inspeção do código.
+
+## Próxima etapa objetiva
+
+A próxima etapa de engenharia dependente do usuário é a **homologação física Android** dos cenários acima. Enquanto o dispositivo real não estiver sendo executado, não alterar o núcleo de binding apenas para produzir testes artificiais.
+
+Em paralelo, o próximo bloco de engenharia que pode ser implementado sem credenciais externas é **backup/restauração**, mas deve começar somente após registrar os cenários físicos de binding como executados ou explicitamente pendentes.
+
+Depois:
+
+1. selecionar/configurar PSP Pix real;
+2. implementar adaptador e webhook real;
+3. persistir idempotência e impedir dupla liquidação;
+4. testar pagamento → licença;
+5. backup + restore real;
+6. VPS/DB/OSRM/HTTPS/domínio;
+7. Android pela Internet;
+8. monitoramento/pilotos;
+9. APK Release assinado e instalação limpa;
+10. auditoria final e Release Candidate.
 
 ## Regras de continuidade
 
