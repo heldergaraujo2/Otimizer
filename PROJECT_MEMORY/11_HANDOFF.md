@@ -62,24 +62,37 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - vida padrão de sessão atual: 12 horas;
 - relógio do servidor usado na validade da sessão/licença.
 
+## PIX — fundação de produção adicionada
+
+`backend/src/otimizer_api/pix_webhook.py` agora fornece primitives provider-neutral para autenticação de webhook:
+
+- HMAC-SHA256 calculado sobre timestamp + corpo bruto;
+- janela temporal configurável para rejeitar replay fora da tolerância;
+- comparação em tempo constante;
+- suporte a assinatura com prefixo `sha256=`;
+- parser estrito de `event_id`, `payment_id`, `amount_cents` e status permitido;
+- nenhum segredo de PSP fica no Android ou no repositório;
+- `backend/tests/test_pix_webhook.py` cobre evento válido, prefixo, corpo adulterado, replay, campos ausentes e valores/status inválidos.
+
+Esta etapa é somente a fundação de segurança. O Pix comercial **não deve ser considerado produção concluída** até que um PSP real seja escolhido/configurado, seu contrato de assinatura seja implementado no adaptador, o endpoint seja ligado à `PaymentService`, a idempotência de eventos seja persistida e a homologação real seja executada.
+
 ## Validação CI
 
 O SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve Backend tests e Frontend tests verdes após a correção do fixture adversarial.
 
 Durante a implementação do binding, o Backend tests do SHA `4af5d80d45a5547f72225c78d88ac5698a24b298` encontrou quatro falhas reais: três causadas por um binding SQL incompleto no novo insert de dispositivo e uma por mapeamento HTTP do estado `DEVICE_REVOKED`. Essas falhas foram corrigidas em `dcfcb2a4dc401dbaca38736adfbe0f686d950d29` e `a620a2399ff6e3b19be2db5d2043acee61e60031`.
 
-O Frontend tests do SHA `a620a2399ff6e3b19be2db5d2043acee61e60031` já concluiu `success`. O Backend tests desse mesmo SHA estava em execução no último checkpoint deste handoff; portanto, não declarar o ciclo verde até a conclusão observável.
+O Frontend tests do SHA `a620a2399ff6e3b19be2db5d2043acee61e60031` já concluiu `success`. Para os commits mais recentes deste ciclo, o conector GitHub não retornou workflow runs associados ao SHA de documentação final; portanto, não declarar CI verde sem nova execução observável.
 
 A suíte local continua não disponível neste ambiente porque o checkout não é montado aqui; a validação definitiva deste ciclo deve usar o GitHub Actions.
 
 ## Próxima etapa obrigatória
 
-1. Confirmar conclusão do Backend tests do SHA final e corrigir qualquer regressão restante.
-2. Fazer teste físico Android de login → licença → binding → otimização e revogação/limite.
-3. Testar reinstalação/restore, segundo dispositivo e sessão expirada.
-4. Implementar PIX de produção com provedor e webhook autenticado.
-5. Implementar backup/restauração do licenciamento e executar teste real de restore.
-6. Avançar para VPS, HTTPS, OSRM e DB de produção.
+1. Confirmar GitHub Actions após o novo teste de webhook e corrigir qualquer regressão.
+2. Executar teste físico Android de login → licença → binding → otimização; revogar dispositivo pelo painel e confirmar bloqueio; validar segundo dispositivo/max_devices, reinstalação/restore e sessão expirada.
+3. Selecionar/configurar PSP Pix real e implementar o adaptador + endpoint de webhook autenticado/idempotente.
+4. Implementar backup/restauração do licenciamento e executar teste real de restore.
+5. Avançar para VPS, HTTPS, OSRM e DB de produção.
 
 ## Regras de continuidade
 
