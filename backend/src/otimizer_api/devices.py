@@ -87,7 +87,7 @@ class SQLiteDeviceRepository:
                 return True, _device_from_row(row, last_seen_at=device.last_seen_at), "DEVICE_REUSED"
             count = connection.execute("SELECT COUNT(*) FROM devices WHERE license_id=? AND revoked_at IS NULL", (device.license_id,)).fetchone()[0]
             if count >= max_devices: return False, None, "DEVICE_LIMIT_REACHED"
-            connection.execute("INSERT INTO devices(device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)", (device.device_id, device.account_id, device.license_id, _iso(device.created_at), _iso(device.last_seen_at)))
+            connection.execute("INSERT INTO devices(device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)", (device.device_id, device.account_id, device.license_id, device.device_key_hash, _iso(device.created_at), _iso(device.last_seen_at)))
             return True, device, "DEVICE_REGISTERED"
     def get(self, device_id: str) -> Device | None:
         with self.database.connect() as connection: row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE device_id=?", (device_id,)).fetchone()
