@@ -9,6 +9,7 @@ import android.content.SharedPreferences;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.Settings;
+import android.util.Base64;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.webkit.JavascriptInterface;
@@ -26,10 +27,28 @@ import androidx.annotation.Nullable;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.KeyStore;
+import java.security.SecureRandom;
+
+import javax.crypto.Cipher;
+import javax.crypto.KeyGenerator;
+import javax.crypto.SecretKey;
+import javax.crypto.spec.GCMParameterSpec;
+import javax.crypto.spec.SecretKeySpec;
+
 public class MainActivity extends Activity {
     private static final int FILE_CHOOSER_REQUEST = 1001;
     private static final String PREFS = "otimizer";
     private static final String API_BASE_KEY = "api_base";
+    private static final String DEVICE_SECRET_CIPHERTEXT_KEY = "device_secret_ciphertext";
+    private static final String DEVICE_SECRET_IV_KEY = "device_secret_iv";
+    private static final String KEYSTORE_ALIAS = "otimizer_device_key_v1";
     private static final String DEFAULT_API_BASE = "http://10.0.2.2:8000";
 
     private WebView webView;
@@ -154,6 +173,91 @@ public class MainActivity extends Activity {
                 .show();
     }
 
+    private SecretKey getOrCreateKeystoreKey() throws Exception {
+        KeyStore keyStore = KeyStore.getInstance("AndroidKeyStore");
+        keyStore.load(null);
+        if (keyStore.containsAlias(KEYSTORE_ALIAS)) {
+            KeyStore.Entry entry = keyStore.getEntry(KEYSTORE_ALIAS, null);
+            return ((KeyStore.SecretKeyEntry) entry).getSecretKey();
+        }
+        KeyGenerator generator = KeyGenerator.getInstance("AES", "AndroidKeyStore");
+        generator.init(256);
+        return generator.generateKey();
+    }
+
+    private synchronized String getOrCreateDeviceSecret() throws Exception {
+        String encodedCiphertext = preferences.getString(DEVICE_SECRET_CIPHERTEXT_KEY, null);
+        String encodedIv = preferences.getString(DEVICE_SECRET_IV_KEY, null);
+        SecretKey key = getOrCreateKeystoreKey();
+        if (encodedCiphertext != null && encodedIv != null) {
+            byte[] ciphertext = Base64.decode(encodedCiphertext, Base64.NO_WRAP);
+            byte[] iv = Base64.decode(encodedIv, Base64.NO_WRAP);
+            Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+            cipher.init(Cipher.DECRYPT_MODE, key, new GCMParameterSpec(128, iv));
+            return Base64.encodeToString(cipher.doFinal(ciphertext), Base64.NO_WRAP);
+        }
+        byte[] secret = new byte[32];
+        new SecureRandom().nextBytes(secret);
+        Cipher cipher = Cipher.getInstance("AES/GCM/NoPadding");
+        cipher.init(Cipher.ENCRYPT_MODE, key);
+        byte[] ciphertext = cipher.doFinal(secret);
+        String newCiphertext = Base64.encodeToString(ciphertext, Base64.NO_WRAP);
+        String newIv = Base64.encodeToString(cipher.getIV(), Base64.NO_WRAP);
+        preferences.edit().putString(DEVICE_SECRET_CIPHERTEXT_KEY, newCiphertext).putString(DEVICE_SECRET_IV_KEY, newIv).apply();
+        return Base64.encodeToString(secret, Base64.NO_WRAP);
+    }
+
+    private static String jsonEscape(String value) {
+        return value.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r");
+    }
+
+    private void bindDeviceToLicense(String accessToken, String licenseId) {
+        if (accessToken == null || accessToken.trim().isEmpty() || licenseId == null || licenseId.trim().isEmpty()) {
+            postBindingResult("{\"bound\":false,\"error\":\"missing_credentials\"}");
+            return;
+        }
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            try {
+                String secret = getOrCreateDeviceSecret();
+                URL url = new URL(getApiBase() + "/devices/bind");
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setRequestMethod("POST");
+                connection.setConnectTimeout(10000);
+                connection.setReadTimeout(15000);
+                connection.setDoOutput(true);
+                connection.setRequestProperty("Authorization", "Bearer " + accessToken);
+                connection.setRequestProperty("Content-Type", "application/json; charset=UTF-8");
+                String payload = "{\"license_id\":\"" + jsonEscape(licenseId.trim()) + "\",\"device_secret\":\"" + jsonEscape(secret) + "\"}";
+                try (OutputStream output = connection.getOutputStream()) {
+                    output.write(payload.getBytes(StandardCharsets.UTF_8));
+                }
+                int status = connection.getResponseCode();
+                java.io.InputStream stream = status >= 400 ? connection.getErrorStream() : connection.getInputStream();
+                StringBuilder body = new StringBuilder();
+                if (stream != null) {
+                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(stream, StandardCharsets.UTF_8))) {
+                        String line;
+                        while ((line = reader.readLine()) != null) body.append(line);
+                    }
+                }
+                String response = body.toString();
+                if (response.isEmpty()) response = "{\"bound\":false,\"error\":\"empty_response\"}";
+                final String result = "{\"http_status\":" + status + ",\"response\":" + response + "}";
+                postBindingResult(result);
+            } catch (Exception ex) {
+                postBindingResult("{\"bound\":false,\"error\":\"binding_failed\"}");
+            } finally {
+                if (connection != null) connection.disconnect();
+            }
+        }, "OtimizerDeviceBinding").start();
+    }
+
+    private void postBindingResult(String result) {
+        if (webView == null) return;
+        webView.post(() -> webView.evaluateJavascript("window.otimizerDeviceBindingResult && window.otimizerDeviceBindingResult(" + result + ");", null));
+    }
+
     @Override
     public boolean onCreateOptionsMenu(Menu menu) {
         menu.add("Servidor").setShowAsAction(MenuItem.SHOW_AS_ACTION_IF_ROOM);
@@ -209,6 +313,11 @@ public class MainActivity extends Activity {
         @JavascriptInterface
         public void openServerSettings() {
             runOnUiThread(MainActivity.this::showServerDialog);
+        }
+
+        @JavascriptInterface
+        public void bindDevice(String accessToken, String licenseId) {
+            bindDeviceToLicense(accessToken, licenseId);
         }
     }
 }
