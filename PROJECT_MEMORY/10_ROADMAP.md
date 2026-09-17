@@ -69,27 +69,29 @@ Milestones implementados:
 
 ## Verificação deste ciclo — 2026-09-17
 
-- `main` está no commit `dab00fd7817300aec0dc750c68c552464e815554`.
-- O último commit é documental e registra a fundação do webhook Pix.
-- Os workflows existentes no repositório incluem Backend tests, Frontend tests, Importer tests e Android APK.
-- Não há workflow run observável associado ao SHA atual por meio da integração disponível; portanto, **CI atual não está declarado verde**.
+- HEAD auditado inicialmente: `081b974aca5a0855e08be565a300c1eb52442817`.
+- Esse commit é filho de `1b94079da362a3b71652aa35d3fa6a5fd63f30db` e contém a reconciliação do security audit com o binding Android já implementado.
+- Os workflows existentes na `main` são Backend tests, Frontend tests, Importer tests e Android APK.
+- Após o HEAD documental, o workflow `Frontend tests` executou no SHA `081b974aca5a0855e08be565a300c1eb52442817` e terminou `success` (run `35243638706`). As etapas de sintaxe JavaScript e testes frontend terminaram com sucesso.
+- Os outros workflows não têm execução correspondente observável para esse SHA nesta auditoria, pois seus gatilhos de push possuem filtros de caminho que não incluem a documentação alterada. Portanto, Backend/Importer/Android não são declarados verdes neste ciclo.
 - A suíte local não está disponível neste ambiente porque o checkout do repositório não é montado aqui.
 - A implementação Android contém geração/proteção do segredo por Keystore e configuração de API, mas os cenários físicos de homologação continuam dependendo de execução em dispositivo real.
-- O histórico recente mostra correções já integradas para CORS do WebView, binding, persistência do hash e bloqueio de dispositivo revogado.
+- Foi adicionada `docs/ANDROID_HOMOLOGATION.md` com a matriz oficial de homologação física do binding/licenciamento.
 
 ## Próximas etapas obrigatórias
 
-1. Executar fisicamente Android: login → licença → binding → otimização.
+1. Executar fisicamente Android conforme `docs/ANDROID_HOMOLOGATION.md`: instalação, login, licença, binding e otimização.
 2. Revogar o dispositivo pelo painel e confirmar bloqueio da otimização.
-3. Validar segundo dispositivo e `max_devices`.
+3. Validar segundo dispositivo, `max_devices` e reuso do mesmo dispositivo.
 4. Validar reinstalação/restore e comportamento do segredo/binding.
-5. Validar sessão expirada.
-6. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
-7. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
-8. Implementar backup/restauração dos dados críticos e executar restore real.
-9. Preparar VPS, DB, OSRM, domínio e HTTPS.
-10. Testar Android pela Internet, monitoramento e usuários piloto.
-11. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
+5. Validar licença expirada/suspensa/revogada e sessão expirada/novo login/revalidação.
+6. Em paralelo, preparar tecnicamente backup/restore provider-neutral sem declarar restore real concluído.
+7. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
+8. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
+9. Executar restore real e validar integridade dos dados críticos.
+10. Preparar VPS, DB, OSRM, domínio e HTTPS.
+11. Testar Android pela Internet, monitoramento e usuários piloto.
+12. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
 
 ## Dependências que não devem ser inventadas
 
