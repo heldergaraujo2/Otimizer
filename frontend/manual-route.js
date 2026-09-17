@@ -130,6 +130,7 @@
   async function optimizeManualRoute() {
     clearError();
     if (!accessToken) return showError("Entre na conta para criar uma rota manual.");
+    if (!deviceBound || !deviceId) return showError("Este dispositivo ainda não foi autorizado pela licença.");
     if (!manualStops.length) return showError("Adicione pelo menos uma parada antes de otimizar.");
     const button = $("manual-optimize");
     button.disabled = true;
@@ -137,7 +138,7 @@
     try {
       const response = await fetch(`${API_BASE}/optimize-manual`, {
         method: "POST",
-        headers: { ...authHeaders(), "Content-Type": "application/json" },
+        headers: { ...authHeaders(), "Content-Type": "application/json", "X-Otimizer-Device-ID": deviceId },
         body: JSON.stringify({ objective: $("manual-objective").value, return_to_start: $("manual-return-to-start").value === "true", stops: manualStops }),
       });
       if (!response.ok) {
