@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import sqlite3
 from dataclasses import replace
 from datetime import datetime, timedelta, timezone
@@ -9,7 +10,7 @@ from pathlib import Path
 
 from .accounts import Account, AccountRepository, AccountRole, Session, SessionRepository
 from .auth import AuthenticationService
-from .licensing import Entitlements, License, LicenseAuthorizer, LicenseEvent, LicenseEventRepository, LicenseRepository, LicenseStatus
+from .licensing import Entitlements, License, LicenseAuthorizer, LicenseConcurrencyError, LicenseEvent, LicenseEventRepository, LicenseRepository, LicenseStatus
 from .payments import PaymentRepository, PaymentStatus, PixCharge
 
 
@@ -90,6 +91,16 @@ class SQLiteLicenseRepository(LicenseRepository):
     def save_with_event(self,license_record,event):
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
+            current_row=connection.execute(_LICENSE_SELECT+" WHERE license_id=?",(license_record.license_id,)).fetchone()
+            current=_license_from_row(current_row)
+            if current is None: raise LicenseConcurrencyError("license changed concurrently; retry the operation")
+            if event.previous_status is not None and current.status is not event.previous_status:
+                raise LicenseConcurrencyError("license changed concurrently; retry the operation")
+            if event.action == "RENEWED":
+                try: metadata=json.loads(event.metadata_json or "{}")
+                except json.JSONDecodeError as exc: raise LicenseConcurrencyError("invalid renewal concurrency metadata") from exc
+                if current.renewal_count != int(metadata.get("expected_renewal_count", -1)) or _iso(current.expires_at) != metadata.get("expected_expires_at"):
+                    raise LicenseConcurrencyError("license changed concurrently; retry the operation")
             self._save_on_connection(connection,license_record)
             connection.execute("INSERT INTO license_events(event_id,license_id,action,occurred_at,actor_account_id,previous_status,new_status,reason,metadata_json) VALUES (?,?,?,?,?,?,?,?,?)",(event.event_id,event.license_id,event.action,_iso(event.occurred_at),event.actor_account_id,event.previous_status.value if event.previous_status else None,event.new_status.value if event.new_status else None,event.reason,event.metadata_json))
     def get_by_id(self,license_id):
