@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
 import sqlite3
 
 import pytest
 
-from otimizer_api.backup import BackupError, create_backup, restore_backup, validate_backup
+from otimizer_api.backup import BackupError, create_backup, prune_backups, restore_backup, validate_backup
 from otimizer_api.persistence import SQLiteDatabase
 
 
@@ -102,3 +103,26 @@ def test_backup_destination_cannot_be_source(tmp_path):
     _seed_database(source)
     with pytest.raises(BackupError, match="differ"):
         create_backup(source, source)
+
+
+def test_prune_keeps_newest_valid_backups_and_never_deletes_invalid(tmp_path):
+    source = tmp_path / "source.db"
+    backup_dir = tmp_path / "backups"
+    invalid = backup_dir / "invalid.db"
+    _seed_database(source)
+    backup_dir.mkdir()
+    backups = []
+    for index in range(3):
+        backup = backup_dir / f"otimizer-{index}.db"
+        create_backup(source, backup)
+        os.utime(backup, (100 + index, 100 + index))
+        backups.append(backup)
+    invalid.write_bytes(b"not-a-backup")
+
+    removed = prune_backups(backup_dir, keep=2)
+
+    assert removed == [backups[0]]
+    assert not backups[0].exists()
+    assert backups[1].exists() and backups[2].exists()
+    assert invalid.exists()
+    assert validate_backup(backups[1])["format_version"] == 1
