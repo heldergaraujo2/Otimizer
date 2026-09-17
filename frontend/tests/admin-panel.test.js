@@ -21,7 +21,7 @@ test("admin panel is a dedicated surface and does not contain backend credential
 
 test("admin panel exposes the complete license lifecycle actions", () => {
   for (const action of ["activate", "renew", "suspend", "reactivate", "revoke"]) {
-    assert.match(js, new RegExp(`/${action}`));
+    assert.match(js, new RegExp(`action === [\\\"]${action}[\\\"]|\\[\\\"${action}[\\\"]`));
   }
   assert.match(js, /history/);
   assert.match(js, /devices/);
