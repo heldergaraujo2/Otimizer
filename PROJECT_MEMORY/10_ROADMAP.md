@@ -19,24 +19,11 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 
 CI/regressões, testes físicos completos do Android, falhas externas, backup/restauração, deploy remoto, Android pela Internet e monitoramento permanecem pendentes.
 
-**Backup/restore provider-neutral: IMPLEMENTAÇÃO TÉCNICA INICIADA.**
+**Backup/restore provider-neutral: fundação implementada.**
 
-Foi adicionado `backend/src/otimizer_api/backup.py`, integrado ao desenho atual de persistência SQLite, com:
+`backend/src/otimizer_api/backup.py` fornece snapshot SQLite, manifest versionado, SHA-256, `PRAGMA integrity_check`, validação de tabelas/contagens críticas, publicação atômica, restore atômico e retenção configurável. `backend/tests/test_backup.py` cobre round-trip, adulteração, manifest ausente, proteção do alvo e retenção. `docs/BACKUP_RESTORE.md` documenta o runbook.
 
-- snapshot usando a API nativa de backup do SQLite;
-- escrita atômica via arquivo temporário + replace;
-- manifest JSON versionado;
-- SHA-256 do snapshot;
-- validação de `PRAGMA integrity_check`;
-- validação das tabelas críticas `accounts`, `sessions`, `licenses`, `license_events` e `payments`;
-- conferência dos contadores registrados no manifest;
-- permissões locais `0600` para os artefatos criados;
-- restore validado para arquivo-alvo separado e substituição atômica somente após validação;
-- falha de validação não substitui um alvo existente.
-
-Foram adicionados testes em `backend/tests/test_backup.py` cobrindo round-trip, integridade, manifest ausente, adulteração, proteção do alvo e prevenção de backup sobre o próprio banco.
-
-**Importante:** isto ainda não é um sistema de backup de produção. Retenção, armazenamento externo/imutável, criptografia em repouso conforme o ambiente, agenda operacional, monitoramento, execução de restore real e prova de recuperação continuam pendentes.
+Isso ainda **não** é backup/restore de produção: destino externo/imutável, criptografia de armazenamento, agendamento, alertas, RPO/RTO e exercício real de recuperação continuam pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
 **EM ANDAMENTO — núcleo comercial e controles de segurança implementados; produção comercial ainda pendente.**
@@ -63,55 +50,50 @@ Milestones implementados:
 - serviço de ciclo de vida para ativação, renovação, suspensão, reativação, revogação e expiração;
 - transições inválidas bloqueadas e expiração baseada no relógio do servidor;
 - API administrativa protegida por `AccountRole.ADMIN`;
-- geração, consulta/filtros, detalhes, ativação, renovação, suspensão, reativação e revogação;
-- gestão e revogação de dispositivos;
-- painel administrativo em `frontend/admin.html`/`admin.js`/`admin.css`;
-- navegação administrativa no app principal somente para `ADMIN`;
-- CI frontend inclui sintaxe e testes do painel;
-- `save_with_event()` com transação SQLite e rollback em falha de auditoria;
-- proteção contra estado obsoleto/lost update em transições concorrentes;
+- gestão de licenças e dispositivos;
+- painel administrativo;
+- `save_with_event()` transacional;
+- proteção contra estado obsoleto/lost update;
 - testes adversariais e concorrentes;
 - revogação de dispositivo com auditoria atômica.
 
 ### Subfase PIX — fundação de segurança implementada
 
-`backend/src/otimizer_api/pix_webhook.py` fornece primitives provider-neutral:
+`backend/src/otimizer_api/pix_webhook.py` fornece primitives provider-neutral: HMAC-SHA256, timestamp/anti-replay, comparação em tempo constante, `sha256=` e validação estrita de evento/pagamento/valor/status.
 
-- HMAC-SHA256 sobre `timestamp + '.' + raw_body`;
-- janela temporal contra replay;
-- comparação em tempo constante;
-- suporte a `sha256=`;
-- validação estrita de `event_id`, `payment_id`, `amount_cents` e status;
-- testes em `backend/tests/test_pix_webhook.py`.
-
-**Não é Pix de produção concluído.** Ainda falta selecionar/configurar o PSP real, implementar seu adaptador conforme documentação oficial, ligar o endpoint à `PaymentService`, persistir idempotência, impedir dupla liquidação e homologar com sandbox/credenciais reais.
+**Não é Pix de produção concluído.** Ainda falta PSP real, adaptador, endpoint específico, idempotência persistente, proteção contra dupla liquidação e homologação.
 
 ## Verificação deste ciclo — 2026-09-17
 
-- HEAD de continuidade anterior: `b346edc61c49dbf02d8dbae464d064e9e3c83239`.
-- Nesta etapa foram adicionados `backup.py` e `test_backup.py`; a sequência resultante ficou nos commits `719039bb48b54680bb9ad76b086ee2d441ab938c` e `4a5edf725ecbdc458aaf5e7b0d0d16ee002b0380`.
-- A persistência atual usa SQLite e contém as tabelas críticas cobertas pelo componente de backup.
-- O ambiente do agente não possui checkout local montado; portanto, os testes não foram executados localmente nesta etapa.
-- Não há execução de GitHub Actions observável para o commit `4a5edf725ecbdc458aaf5e7b0d0d16ee002b0380` e o combined status retornou vazio. Logo, a suíte Backend ainda não é declarada verde neste ciclo.
-- A implementação foi limitada ao domínio provider-neutral de backup/restore; não houve alteração no roteador, localização, otimização, Android, licenciamento ou integração Pix específica.
+- Continuidade anterior: `b346edc61c49dbf02d8dbae464d064e9e3c83239`.
+- Implementação backup: `719039bb48b54680bb9ad76b086ee2d441ab938c`.
+- Testes backup: `4a5edf725ecbdc458aaf5e7b0d0d16ee002b0380`.
+- Retenção: `eb4ecd77a298803b40f9ca5ab5b6edf12bf71ad`.
+- Teste de retenção: `f8bc7b305dae3293ef460bd463ccfd7ac134212f`.
+- Runbook: `0b6f51eecb3cb64063bf5cfb2c4a3fd4ea790f4b`.
+- Documentação de continuidade/security foi atualizada nesta mesma sequência.
+- O checkout local não está montado no ambiente do agente; testes locais não foram executados.
+- Não há evidência observável pelo conector de CI Backend para estes commits; combined status observado anteriormente foi vazio. Portanto, Backend não é declarado verde.
+- Nenhuma alteração foi feita no motor de localização, OSRM, otimização, Android, licenciamento ou integração Pix específica.
 
 ## Próximas etapas obrigatórias
 
 1. Executar fisicamente Android conforme `docs/ANDROID_HOMOLOGATION.md`.
-2. Completar retenção, armazenamento externo seguro, agendamento e observabilidade de backups.
-3. Executar restore real em ambiente controlado e validar dados críticos + inicialização da aplicação.
-4. Definir política de sessões após restore; por segurança operacional, reautenticação/invalidação de sessões restauradas deve ser tratada explicitamente antes de produção.
-5. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
-6. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
-7. Preparar VPS, DB, OSRM, domínio e HTTPS.
-8. Testar Android pela Internet, monitoramento e usuários piloto.
-9. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
+2. Criar prova automatizada de restore + boot da aplicação em ambiente controlado.
+3. Homologar restore real em staging e validar dados críticos.
+4. Definir/instrumentar invalidação ou reautenticação de sessões após restore.
+5. Definir destino externo/imutável, criptografia, agendamento, alertas e RPO/RTO para produção.
+6. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
+7. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
+8. Preparar VPS, DB, OSRM, domínio e HTTPS.
+9. Testar Android pela Internet, monitoramento e usuários piloto.
+10. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
 
 ## Dependências que não devem ser inventadas
 
-- PSP Pix real ainda não foi identificado no repositório; nenhuma integração específica deve ser criada assumindo um provedor.
-- Testes físicos Android exigem dispositivo/ambiente de execução real.
-- Credenciais de produção, domínio e infraestrutura só podem ser configurados com valores reais fornecidos/gerados no ambiente apropriado.
+- PSP Pix real ainda não foi identificado no repositório.
+- Testes físicos Android exigem dispositivo/ambiente real.
+- Credenciais, domínio e infraestrutura de produção só podem ser configurados com valores reais no ambiente apropriado.
 
 ## Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
