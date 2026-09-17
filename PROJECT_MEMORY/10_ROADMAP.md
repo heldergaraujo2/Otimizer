@@ -10,23 +10,23 @@ Fluxo-alvo:
 ## Estado das fases
 
 ### Fases 1–9 — núcleo funcional
-**CONCLUÍDAS conforme registros anteriores; robustez/produção ainda pendentes.**
+**CONCLUÍDAS conforme histórico e estado atual do repositório; robustez/produção ainda pendentes.**
 
-Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização, FastAPI, frontend, autenticação/licenciamento base e Android foram construídos e validados conforme os registros do projeto, incluindo mais de 30 XLSX reais e primeiro teste Android físico pela LAN.
+Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização, FastAPI, frontend, autenticação/licenciamento base e Android foram construídos. O histórico registra validação com mais de 30 XLSX reais e primeiro teste Android físico pela LAN.
 
 ### Fase 10 — Robustez e produção técnica
-**EM ANDAMENTO**
+**EM ANDAMENTO.**
 
-CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
+CI/regressões, testes físicos completos do Android, falhas externas, backup/restauração, deploy remoto, Android pela Internet e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web, atomicidade, concorrência e integração de binding cliente-servidor implementados; produção comercial ainda pendente.**
+**EM ANDAMENTO — núcleo comercial e controles de segurança implementados; produção comercial ainda pendente.**
 
 Milestones implementados:
 
 - estados `GERADA`, `DISPONIVEL`, `ATIVA`, `EXPIRADA`, `SUSPENSA`, `REVOGADA`;
 - `license_key` de alta entropia, distinto do ID interno;
-- plano, ativação, renovação, contador e último acesso;
+- plano, ativação, renovação, contador, último acesso e entitlements;
 - eventos de auditoria persistentes;
 - roles `USER`/`ADMIN`;
 - migração aditiva do SQLite legado;
@@ -35,69 +35,74 @@ Milestones implementados:
 - hash do segredo da instalação;
 - enforcement server-side de `max_devices`;
 - reuso do mesmo dispositivo sem consumir slot;
-- revogação permanente do binding;
-- segredo Android protegido por Android Keystore e persistido cifrado;
+- revogação terminal do binding;
+- segredo Android protegido por Android Keystore e armazenado cifrado;
 - endpoint autenticado `/devices/bind` sem retorno do segredo/hash;
-- browser também possui identidade de instalação aleatória persistida localmente;
-- autorização server-side das rotas por `X-Otimizer-Device-ID` quando o app global usa o repositório de dispositivos;
-- rota manual também exige binding de dispositivo;
-- revogação do dispositivo bloqueia nova tentativa com o mesmo segredo;
+- fallback de identidade de instalação no navegador;
+- autorização server-side de `/optimize` e `/optimize-manual` por `X-Otimizer-Device-ID` quando o repositório de dispositivos está ativo;
+- revogação do dispositivo bloqueia uso posterior;
 - serviço de ciclo de vida para ativação, renovação, suspensão, reativação, revogação e expiração;
-- transições inválidas bloqueadas e revogação terminal;
-- expiração baseada no relógio do servidor;
-- auditoria de transições;
+- transições inválidas bloqueadas e expiração baseada no relógio do servidor;
 - API administrativa protegida por `AccountRole.ADMIN`;
-- geração, consulta, ativação, renovação, suspensão, reativação e revogação por API;
-- listagem/detalhes/histórico de licenças;
-- listagem e revogação de dispositivos;
-- painel administrativo dedicado em `frontend/admin.html`, com login ADMIN, métricas, filtros, geração, detalhes, ciclo de vida, dispositivos e histórico;
-- navegação para administração no app principal somente para contas `ADMIN`;
-- CI frontend ampliado para validar o novo painel;
-- respostas administrativas sem expor segredos de instalação;
-- `save_with_event()` em SQLite para persistir licença + auditoria em uma transação única;
-- rollback testado quando a inserção do evento falha;
-- proteção otimista contra estado obsoleto em transições concorrentes;
-- testes concorrentes determinísticos para ativação, renovação e revogação;
-- revogação de dispositivo com auditoria atômica em SQLite.
+- geração, consulta/filtros, detalhes, ativação, renovação, suspensão, reativação e revogação;
+- gestão e revogação de dispositivos;
+- painel administrativo em `frontend/admin.html`/`admin.js`/`admin.css`;
+- navegação administrativa no app principal somente para `ADMIN`;
+- CI frontend inclui sintaxe e testes do painel;
+- `save_with_event()` com transação SQLite e rollback em falha de auditoria;
+- proteção contra estado obsoleto/lost update em transições concorrentes;
+- testes adversariais e concorrentes;
+- revogação de dispositivo com auditoria atômica.
 
-### Subfase de segurança adversarial — progresso atual
+### Subfase PIX — fundação de segurança implementada
 
-A suíte `backend/tests/test_licensing_security_adversarial.py` cobre manipulação de chave, revogação terminal, replay de sessão, hash de segredo e concorrência do limite de dispositivos.
-
-`backend/tests/test_license_atomicity.py` verifica que uma transição não permanece aplicada quando o registro de auditoria falha e que uma transição normal gera estado + histórico juntos.
-
-`backend/tests/test_license_concurrency.py` força uma leitura concorrente do mesmo estado e verifica que somente uma operação vence, sem lost update e sem duplicação do evento de auditoria.
-
-`backend/tests/test_device_binding_api.py` e `backend/tests/test_device_authorization.py` cobrem autenticação, limite, reuso, revogação, isolamento e bloqueio server-side da rota sem binding válido.
-
-### Subfase PIX — fundação de produção implementada
-
-Foi adicionada `backend/src/otimizer_api/pix_webhook.py`, uma camada provider-neutral para validar webhooks Pix antes de alterar pagamentos/licenças:
+`backend/src/otimizer_api/pix_webhook.py` fornece primitives provider-neutral:
 
 - HMAC-SHA256 sobre `timestamp + '.' + raw_body`;
-- janela temporal configurável contra replay;
+- janela temporal contra replay;
 - comparação em tempo constante;
-- suporte ao formato `sha256=`;
-- validação estrita do evento, pagamento, valor e status;
-- nenhuma credencial de PSP no APK ou no código-fonte;
-- testes de assinatura válida, adulteração, replay, campos obrigatórios e status/valor inválidos em `backend/tests/test_pix_webhook.py`.
+- suporte a `sha256=`;
+- validação estrita de `event_id`, `payment_id`, `amount_cents` e status;
+- testes em `backend/tests/test_pix_webhook.py`.
 
-**Importante:** isto fecha a fundação de segurança do webhook, mas **não** significa que o Pix de produção esteja concluído. Ainda falta selecionar/configurar o PSP real, implementar o adaptador conforme a documentação oficial desse provedor, receber o webhook no endpoint da API, persistir idempotência por evento e executar homologação com credenciais reais.
+**Não é Pix de produção concluído.** Ainda falta selecionar/configurar o PSP real, implementar seu adaptador conforme documentação oficial, ligar o endpoint à `PaymentService`, persistir idempotência, impedir dupla liquidação e homologar com sandbox/credenciais reais.
 
-### Próximas etapas obrigatórias
+## Verificação deste ciclo — 2026-09-17
 
-1. Confirmar GitHub Actions do ciclo após os commits de webhook e corrigir qualquer regressão.
-2. Executar teste físico Android de login → licença → binding → otimização; revogar dispositivo pelo painel e confirmar bloqueio; validar segundo dispositivo/max_devices, reinstalação/restore e sessão expirada.
-3. Escolher/configurar o PSP Pix real e ligar o adaptador ao fluxo assinado/idempotente.
-4. Implementar backup/restauração do licenciamento e executar teste real de restore.
-5. Avançar para arquitetura/VPS/HTTPS/OSRM/DB de produção e testes completos pela Internet.
+- `main` está no commit `dab00fd7817300aec0dc750c68c552464e815554`.
+- O último commit é documental e registra a fundação do webhook Pix.
+- Os workflows existentes no repositório incluem Backend tests, Frontend tests, Importer tests e Android APK.
+- Não há workflow run observável associado ao SHA atual por meio da integração disponível; portanto, **CI atual não está declarado verde**.
+- A suíte local não está disponível neste ambiente porque o checkout do repositório não é montado aqui.
+- A implementação Android contém geração/proteção do segredo por Keystore e configuração de API, mas os cenários físicos de homologação continuam dependendo de execução em dispositivo real.
+- O histórico recente mostra correções já integradas para CORS do WebView, binding, persistência do hash e bloqueio de dispositivo revogado.
 
-### Sistema de atualização por patch
+## Próximas etapas obrigatórias
+
+1. Executar fisicamente Android: login → licença → binding → otimização.
+2. Revogar o dispositivo pelo painel e confirmar bloqueio da otimização.
+3. Validar segundo dispositivo e `max_devices`.
+4. Validar reinstalação/restore e comportamento do segredo/binding.
+5. Validar sessão expirada.
+6. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
+7. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
+8. Implementar backup/restauração dos dados críticos e executar restore real.
+9. Preparar VPS, DB, OSRM, domínio e HTTPS.
+10. Testar Android pela Internet, monitoramento e usuários piloto.
+11. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
+
+## Dependências que não devem ser inventadas
+
+- PSP Pix real ainda não foi identificado no repositório; nenhuma integração específica deve ser criada assumindo um provedor.
+- Testes físicos Android exigem dispositivo/ambiente de execução real.
+- Credenciais de produção, domínio e infraestrutura só podem ser configurados com valores reais fornecidos/gerados no ambiente apropriado.
+
+## Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
 
 ## Critérios de release
 
-Todas as suítes verdes, preservação integral das entregas/PhysicalStops, localização e roteamento confiáveis, backend remoto testado, licenciamento comercial auditável, backup/restore, APK release assinado, instalação limpa, segurança e escalabilidade auditadas.
+Todas as suítes verdes e verificadas, preservação integral das entregas/PhysicalStops, localização e roteamento confiáveis, backend remoto testado, licenciamento comercial auditável, Pix homologado, backup/restore comprovado, APK release assinado, instalação limpa, segurança e escalabilidade auditadas.
 
 ## Regra
 
