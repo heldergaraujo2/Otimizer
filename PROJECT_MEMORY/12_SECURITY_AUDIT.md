@@ -2,9 +2,9 @@
 
 ## Escopo
 
-Revisão da camada comercial do OTIMIZER após a implementação de estados formais de licença, auditoria, binding de dispositivos, proteção contra concorrência e painel administrativo.
+Revisão da camada comercial do OTIMIZER após a implementação de estados formais de licença, auditoria, binding de dispositivos, proteção contra concorrência, painel administrativo e integração do binding no cliente Android.
 
-## Controles confirmados
+## Controles confirmados no estado atual
 
 - Senhas são protegidas com Argon2id e exigem pelo menos 12 caracteres.
 - Tokens de sessão são aleatórios e somente o hash SHA-256 é persistido no servidor.
@@ -21,18 +21,28 @@ Revisão da camada comercial do OTIMIZER após a implementação de estados form
 - Endpoints administrativos exigem sessão válida e role ADMIN.
 - Respostas administrativas não expõem o hash do segredo de dispositivo.
 - Usuários comuns não podem consultar ou alterar recursos administrativos.
+- Android gera segredo por instalação e o protege com Android Keystore; o backend recebe a prova necessária para binding e não armazena o segredo bruto.
+- `/optimize` e `/optimize-manual` podem exigir `X-Otimizer-Device-ID` quando o repositório de dispositivos está ativo.
+- Dispositivo revogado é rejeitado server-side mesmo com licença ativa.
+
+## PIX
+
+A camada atual de webhook Pix é provider-neutral e cobre HMAC-SHA256, timestamp, janela anti-replay, comparação em tempo constante, prefixo `sha256=`, validação estrita de evento/pagamento/valor/status e testes adversariais.
+
+Isso **não equivale a integração Pix de produção**. Falta PSP real, contrato de assinatura específico, endpoint ligado ao provedor, idempotência persistente, proteção contra dupla liquidação e homologação.
 
 ## Limitações assumidas
 
-- O backend ainda não possui um rate limiter distribuído próprio. Não será tratado um contador em memória como solução de produção para múltiplas instâncias.
-- Rate limiting de produção deve ser aplicado no gateway/VPS, com regras específicas para login e operações administrativas, preservando também proteção no nível da aplicação quando necessário.
-- O PIX atual permanece sandbox até integração com provedor real e webhook autenticado.
-- O Android ainda não está vinculado ao backend pelo segredo de instalação no fluxo final; essa é a próxima implementação obrigatória.
+- O backend ainda não possui rate limiter distribuído próprio. Rate limiting de produção deve ser aplicado no gateway/VPS, com regras específicas para login e operações administrativas, mantendo proteção de aplicação quando necessário.
+- Backup/restauração ainda precisa ser implementado e comprovado com restore real.
+- O APK atual é debug; release comercial assinado ainda não foi produzido.
+- Homologação física completa de binding, revogação, `max_devices`, reinstalação/restore e sessão expirada ainda depende de execução em dispositivo real.
+- Infraestrutura de produção (VPS, domínio, HTTPS, DB/OSRM remoto e observabilidade) ainda não está homologada.
 
 ## Evidência de CI
 
-O SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve o workflow Backend tests concluído com sucesso após a correção do fixture adversarial. O workflow Frontend tests correspondente também concluiu com sucesso.
+Historicamente, o SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve Backend tests e Frontend tests concluídos com sucesso. Entretanto, o commit atual auditado não possui workflow run observável pela integração disponível. Portanto, não declarar a `main` atual verde sem nova evidência.
 
 ## Próximo objetivo
 
-Implementar o binding de dispositivo no Android usando Android Keystore, enviar a prova de instalação ao backend e exigir esse vínculo nas operações protegidas. O objetivo é que uma conta com licença ativa não seja suficiente, isoladamente, para autorizar o uso de uma instalação não vinculada.
+Executar a homologação física do Android sobre o binding já implementado. Em seguida, avançar para PSP Pix real e backup/restauração, sem inventar credenciais, resultados de testes ou infraestrutura.
