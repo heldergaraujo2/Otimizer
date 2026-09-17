@@ -30,46 +30,44 @@ Fluxo-alvo:
 - Testes remotos, Android de campo, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**STATUS: EM ANDAMENTO — PERSISTÊNCIA COMERCIAL COMPATÍVEL CONCLUÍDA; SERVIÇO/ADMIN/DISPOSITIVOS AINDA PENDENTES**
+**STATUS: EM ANDAMENTO — PERSISTÊNCIA + DISPOSITIVOS/BINDING IMPLEMENTADOS; CICLO DE VIDA E ADMINISTRAÇÃO PENDENTES**
 
-Auditoria realizada antes da alteração:
+A base existente foi preservada e evoluída para o modelo comercial. A licença continua sendo autoridade do backend e o relógio do servidor continua sendo a fonte de validade.
 
-- O projeto já possuía `License`, `Entitlements`, autenticação/sessões, SQLite, autorização server-side, `/licenses/me` e PIX sandbox.
-- Não possuía máquina de estados comercial completa, chave comercial separada, histórico de eventos, RBAC administrativo, dispositivos/binding, painel administrativo ou auditoria comercial completa.
+Milestones implementados:
 
-Milestones implementados no GitHub:
+- `LicenseStatus`: `GERADA`, `DISPONIVEL`, `ATIVA`, `EXPIRADA`, `SUSPENSA`, `REVOGADA`.
+- `license_key` de alta entropia separado do `license_id` interno.
+- plano, ativação, renovação, contador e último acesso.
+- `effective_status()` dependente do servidor.
+- `LicenseEvent` e histórico persistente.
+- `AccountRole` (`USER`/`ADMIN`).
+- Persistência/migração SQLite dos campos comerciais sem apagar dados legados.
+- Unicidade de `license_key` no banco.
+- Entidade `Device` e `SQLiteDeviceRepository`.
+- Hash do segredo da instalação; o segredo bruto não é persistido.
+- Binding de dispositivo a conta/licença.
+- Enforcement server-side de `max_devices`.
+- Reuso do mesmo dispositivo sem consumir novo slot.
+- Revogação de dispositivo libera capacidade para nova instalação.
+- Bloqueio de binding para licença expirada, suspensa ou revogada.
+- Check de capacidade e inserção executados na mesma transação SQLite (`BEGIN IMMEDIATE`) para reduzir corrida entre registros concorrentes.
+- Eventos de registro/reuso/limite/revogação enviados ao histórico quando o repositório de eventos está disponível.
 
-- `LicenseStatus` formalizado: `GERADA`, `DISPONIVEL`, `ATIVA`, `EXPIRADA`, `SUSPENSA`, `REVOGADA`.
-- `license_id` permanece identificador interno e `license_key` representa a credencial comercial de alta entropia.
-- `License` possui plano, ativação, renovação e último acesso, preservando compatibilidade dos construtores existentes.
-- `Entitlements` valida limites positivos.
-- `LicenseEvent` fornece base de histórico imutável.
-- `AccountRole` (`USER`/`ADMIN`) fornece fundação para RBAC administrativo.
-- SQLite agora persiste role, chave, estado, plano, ativação, renovação e último acesso.
-- Foi criada tabela persistente `license_events` com índice temporal por licença.
-- Foi criada unicidade de banco para `license_key`.
-- Migração é aditiva: bancos legados recebem colunas ausentes e chaves retrocompatíveis antes do índice único, sem apagar dados existentes.
-- Liquidação PIX sandbox continua vinculada à licença e agora atualiza estado/renovação persistidos.
-- Testes adicionados para role, campos comerciais, unicidade, histórico durável e migração de banco legado.
+Testes adicionados:
 
-Commits do núcleo comercial e persistência:
-
-- `3058a0fd50d70901d82cd02e82900673db944856` — núcleo do ciclo comercial.
-- `6b1a2f4c6db0fc15904c4835bbce234dbbbcdeab` — roles de conta.
-- `0f2fe7331f91015068f04269517b443f8e3f6ad8` — testes do núcleo.
-- `671c2592cef433422584296756c0e5b604ae000f` — documentação do milestone inicial.
-- `c7b538b0efdd95f6b6bc931fc7aef44c7db3a438` — handoff do milestone inicial.
-- `a351e8eb343293a40c6a00d2c3999eff8bd6b14c` — persistência comercial/migração.
-- `9cbf64e30ceb3fc0afb44fe1fe5763c14458a138` — testes de migração/persistência.
+- `backend/tests/test_devices.py` — hash, primeiro dispositivo, limite, reuso, estados inválidos, revogação, persistência e enforcement SQLite.
+- `backend/tests/test_persistence_licensing_migration.py` — migração/persistência comercial.
+- `backend/tests/test_license_lifecycle_primitives.py` — estados/chave/eventos.
 
 ### Próxima subfase do licenciamento
 
-1. **Próxima etapa imediata:** dispositivos, vínculo de licença e enforcement real de `max_devices`.
-2. Serviço transacional de geração, ativação, renovação, suspensão, reativação e revogação com eventos de auditoria.
-3. Endpoints administrativos protegidos por `AccountRole.ADMIN`.
-4. Painel administrativo.
-5. Histórico, filtros, dashboard e auditoria operacional.
-6. Testes adversariais, concorrência e manipulação.
+1. Serviço transacional de geração, ativação, renovação, suspensão, reativação e revogação com regras explícitas de transição e eventos atômicos.
+2. Endpoints administrativos protegidos por `AccountRole.ADMIN`.
+3. Painel administrativo.
+4. Histórico, filtros, dashboard e detalhes.
+5. Testes adversariais, concorrência e manipulação ponta a ponta.
+6. Integração do binding com o fluxo real Android → backend.
 7. PIX sandbox → arquitetura de produção com provedor real/webhook autenticado.
 8. Backup/restauração do licenciamento.
 
