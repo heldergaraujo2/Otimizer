@@ -36,7 +36,7 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - renovações também validam `renewal_count` e `expires_at` esperados;
 - `backend/tests/test_license_concurrency.py` força a corrida de leitura e verifica um único vencedor/evento em ativação, renovação e revogação;
 - revogação de dispositivo em SQLite pode persistir alteração + auditoria na mesma transação;
-- testes adversariais anteriores permanecem: adulteração de chave, revogação terminal, replay de sessão, hash de segredo e concorrência de device binding;
+- testes adversariais cobrem adulteração de chave, revogação terminal, replay de sessão, hash de segredo e concorrência de device binding;
 - endpoints administrativos exigem autenticação e `ADMIN`, com validação de payload e sem exposição do hash do dispositivo.
 
 ## Autenticação/sessões
@@ -48,21 +48,20 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - vida padrão de sessão atual: 12 horas;
 - relógio do servidor usado na validade da sessão/licença.
 
-## Validação
+## Validação CI
 
-As alterações são enviadas diretamente ao `main`. A suíte local não está disponível neste ambiente porque o checkout não é montado aqui e o ambiente de execução não possui acesso de rede para clonar o GitHub. A validação definitiva deve usar os workflows do GitHub Actions e não deve ser declarada verde sem conclusão observável.
+O ajuste do fixture adversarial foi enviado no SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b`. O workflow Backend tests desse SHA concluiu `success`, assim como o workflow Frontend tests correspondente. Esta é a evidência atual de que a regressão observada foi corrigida.
 
-No momento do último registro, o workflow backend referente ao SHA `9d9f36beb08748089252274c120048a9f057a61f` ainda estava `in_progress`; o frontend desse SHA já havia concluído com sucesso. Um run anterior do backend (`35222409044`) havia falhado antes do hardening atual, portanto não deve ser usado como evidência de estado final.
+A suíte local continua não disponível neste ambiente porque o checkout não é montado aqui; a validação definitiva deste ciclo foi feita pelo GitHub Actions.
 
 ## Próxima etapa obrigatória
 
-1. Confirmar conclusão do CI backend e corrigir qualquer regressão real.
-2. Fechar revisão de abuso administrativo, isolamento entre contas e vazamento de dados sensíveis.
-3. Revisar limites administrativos e rate limiting; proteção distribuída de produção deve ficar no gateway/VPS, não em um contador local disfarçado de solução distribuída.
-4. Integrar binding no Android no fluxo real de login/licença.
-5. Implementar PIX de produção com provedor e webhook autenticado.
-6. Implementar backup/restauração do licenciamento e executar teste real de restore.
-7. Avançar para VPS, HTTPS, OSRM e DB de produção.
+1. Fechar a integração de binding de dispositivo no Android: gerar/armazenar segredo por instalação com Android Keystore, autenticar no backend e vincular ao limite da licença.
+2. Fazer o fluxo de uso depender da autorização do dispositivo, sem confiar somente na licença da conta.
+3. Testar instalação/reinstalação, segundo dispositivo, limite, revogação e sessão expirada.
+4. Depois, implementar PIX de produção com provedor e webhook autenticado.
+5. Implementar backup/restauração do licenciamento e executar teste real de restore.
+6. Avançar para VPS, HTTPS, OSRM e DB de produção.
 
 ## Regras de continuidade
 
