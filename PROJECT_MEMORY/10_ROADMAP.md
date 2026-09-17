@@ -20,7 +20,7 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web e primeira camada transacional implementados; hardening e produção ainda pendentes.**
+**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web, atomicidade e proteção contra lost updates implementados; integração Android e produção ainda pendentes.**
 
 Milestones implementados:
 
@@ -49,23 +49,28 @@ Milestones implementados:
 - CI frontend ampliado para validar o novo painel;
 - respostas administrativas sem expor segredos de instalação;
 - `save_with_event()` em SQLite para persistir licença + auditoria em uma transação única;
-- rollback testado quando a inserção do evento falha.
+- rollback testado quando a inserção do evento falha;
+- proteção otimista contra estado obsoleto em transições concorrentes: status anterior é validado dentro da transação e renovações também validam contador + expiração esperados;
+- testes concorrentes determinísticos para ativação, renovação e revogação;
+- revogação de dispositivo com auditoria atômica em SQLite.
 
 ### Subfase de segurança adversarial — progresso atual
 
-Foi adicionada uma suíte específica em `backend/tests/test_licensing_security_adversarial.py` cobrindo manipulação de chave, revogação terminal, replay de sessão, hash de segredo e concorrência do limite de dispositivos.
+A suíte `backend/tests/test_licensing_security_adversarial.py` cobre manipulação de chave, revogação terminal, replay de sessão, hash de segredo e concorrência do limite de dispositivos.
 
-Foi adicionada `backend/tests/test_license_atomicity.py` para verificar que uma transição não permanece aplicada quando o registro de auditoria falha e que uma transição normal gera estado + histórico juntos.
+`backend/tests/test_license_atomicity.py` verifica que uma transição não permanece aplicada quando o registro de auditoria falha e que uma transição normal gera estado + histórico juntos.
+
+`backend/tests/test_license_concurrency.py` força uma leitura concorrente do mesmo estado e verifica que somente uma operação vence, sem lost update e sem duplicação do evento de auditoria.
 
 ### Próxima subfase do licenciamento
 
-1. Observar CI e corrigir qualquer regressão introduzida pela camada transacional.
-2. Completar testes concorrentes específicos de ativação/renovação/revogação e impedir lost updates.
-3. Completar testes de abuso dos endpoints administrativos, isolamento entre contas e não vazamento de dados sensíveis.
-4. Revisar rate limiting, sessões/tokens e limites administrativos.
-5. Integrar binding no Android no fluxo real de login/licença.
-6. PIX de produção com provedor e webhook autenticado.
-7. Backup/restauração do licenciamento com teste real de restore.
+1. Confirmar CI backend após o hardening e corrigir qualquer regressão.
+2. Fechar revisão de abuso administrativo, isolamento entre contas e vazamento de dados sensíveis.
+3. Revisar rate limiting, sessões/tokens e limites administrativos; rate limiting distribuído de produção deverá ficar no gateway/VPS quando o backend for implantado.
+4. Integrar binding no Android no fluxo real de login/licença.
+5. PIX de produção com provedor e webhook autenticado.
+6. Backup/restauração do licenciamento com teste real de restore.
+7. Depois disso, avançar para arquitetura/VPS/HTTPS/OSRM/DB de produção e testes completos pela Internet.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
