@@ -38,8 +38,10 @@ class InMemoryDeviceRepository:
     def __init__(self, devices: list[Device] | None = None) -> None:
         self._devices = {device.device_id: device for device in devices or []}
     def register(self, device: Device, max_devices: int) -> tuple[bool, Device | None, str]:
-        existing = next((item for item in self._devices.values() if item.license_id == device.license_id and item.device_key_hash == device.device_key_hash and item.active), None)
+        existing = next((item for item in self._devices.values() if item.license_id == device.license_id and item.device_key_hash == device.device_key_hash), None)
         if existing is not None:
+            if existing.revoked_at is not None:
+                return False, None, "DEVICE_REVOKED"
             refreshed = Device(existing.device_id, existing.account_id, existing.license_id, existing.device_key_hash, existing.created_at, device.last_seen_at, None)
             self._devices[existing.device_id] = refreshed
             return True, refreshed, "DEVICE_REUSED"
@@ -78,12 +80,14 @@ class SQLiteDeviceRepository:
         with self.database.connect() as connection:
             connection.execute("BEGIN IMMEDIATE")
             row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE license_id=? AND device_key_hash=?", (device.license_id, device.device_key_hash)).fetchone()
-            if row is not None and row["revoked_at"] is None:
+            if row is not None:
+                if row["revoked_at"] is not None:
+                    return False, None, "DEVICE_REVOKED"
                 connection.execute("UPDATE devices SET last_seen_at=? WHERE device_id=?", (_iso(device.last_seen_at), row["device_id"]))
                 return True, _device_from_row(row, last_seen_at=device.last_seen_at), "DEVICE_REUSED"
             count = connection.execute("SELECT COUNT(*) FROM devices WHERE license_id=? AND revoked_at IS NULL", (device.license_id,)).fetchone()[0]
             if count >= max_devices: return False, None, "DEVICE_LIMIT_REACHED"
-            connection.execute("INSERT INTO devices(device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)", (device.device_id, device.account_id, device.license_id, device.device_key_hash, _iso(device.created_at), _iso(device.last_seen_at)))
+            connection.execute("INSERT INTO devices(device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)", (device.device_id, device.account_id, device.license_id, _iso(device.created_at), _iso(device.last_seen_at)))
             return True, device, "DEVICE_REGISTERED"
     def get(self, device_id: str) -> Device | None:
         with self.database.connect() as connection: row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE device_id=?", (device_id,)).fetchone()
@@ -121,7 +125,7 @@ class DeviceBindingService:
         if not license_record.is_active(current): return False, None, _license_error(license_record, current)
         device = Device(token_urlsafe(18), account_id, license_id, hash_device_secret(device_secret), current, current)
         allowed, bound, code = self.devices.register(device, license_record.entitlements.max_devices)
-        if self.events is not None: self.events.append(create_license_event(license_id, code, current, actor_account_id=account_id, new_status=license_record.status, metadata_json='{"device_binding":true}'))
+        if self.events is not None and code != "DEVICE_LIMIT_REACHED": self.events.append(create_license_event(license_id, code, current, actor_account_id=account_id, new_status=license_record.status, metadata_json='{"device_binding":true}'))
         return allowed, bound, code
     def revoke(self, account_id: str, device_id: str, now: datetime | None = None) -> bool:
         current = _utc(now); device = self.devices.get(device_id)
