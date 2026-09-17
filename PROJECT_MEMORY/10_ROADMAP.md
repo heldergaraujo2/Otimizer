@@ -49,12 +49,26 @@ Milestones implementados:
 - CI frontend ampliado para validar o novo painel;
 - respostas administrativas sem expor segredos de instalação.
 
+### Subfase de segurança adversarial — progresso atual
+
+Foi adicionada uma suíte específica em `backend/tests/test_licensing_security_adversarial.py` cobrindo:
+
+- separação entre chave comercial e ID interno;
+- tentativa de manipulação da chave sem alteração do estado autoritativo;
+- terminalidade da revogação;
+- expiração server-side de sessão e rejeição de replay após expiração;
+- armazenamento do segredo de dispositivo somente como hash;
+- concorrência real do limite `max_devices` em SQLite, verificando que apenas um registro vence quando oito tentativas simultâneas competem por uma licença com um único slot.
+
+A atomicidade completa de **licença + evento de auditoria** ainda é um requisito de hardening: o serviço atual persiste os dois em operações separadas. Não considerar essa parte concluída até que exista transação única com teste de rollback.
+
 ### Próxima subfase do licenciamento
 
-1. Segurança adversarial dos endpoints, abuso, replay, manipulação de chave, concorrência e revisão da atomicidade licença + auditoria.
-2. Integração Android do binding com o fluxo real de login/licença.
-3. PIX de produção com provedor e webhook autenticado.
-4. Backup/restauração do licenciamento com teste real de restore.
+1. Concluir atomicidade transacional licença + auditoria e testar rollback/conflitos concorrentes.
+2. Completar testes de abuso dos endpoints administrativos, isolamento entre contas e não vazamento de dados sensíveis.
+3. Integração Android do binding com o fluxo real de login/licença.
+4. PIX de produção com provedor e webhook autenticado.
+5. Backup/restauração do licenciamento com teste real de restore.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
