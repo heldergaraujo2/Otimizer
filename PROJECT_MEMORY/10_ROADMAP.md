@@ -20,7 +20,7 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida e painel web implementados; hardening e produção ainda pendentes.**
+**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web e primeira camada transacional implementados; hardening e produção ainda pendentes.**
 
 Milestones implementados:
 
@@ -47,28 +47,25 @@ Milestones implementados:
 - painel administrativo dedicado em `frontend/admin.html`, com login ADMIN, métricas, filtros, geração, detalhes, ciclo de vida, dispositivos e histórico;
 - navegação para administração no app principal somente para contas `ADMIN`;
 - CI frontend ampliado para validar o novo painel;
-- respostas administrativas sem expor segredos de instalação.
+- respostas administrativas sem expor segredos de instalação;
+- `save_with_event()` em SQLite para persistir licença + auditoria em uma transação única;
+- rollback testado quando a inserção do evento falha.
 
 ### Subfase de segurança adversarial — progresso atual
 
-Foi adicionada uma suíte específica em `backend/tests/test_licensing_security_adversarial.py` cobrindo:
+Foi adicionada uma suíte específica em `backend/tests/test_licensing_security_adversarial.py` cobrindo manipulação de chave, revogação terminal, replay de sessão, hash de segredo e concorrência do limite de dispositivos.
 
-- separação entre chave comercial e ID interno;
-- tentativa de manipulação da chave sem alteração do estado autoritativo;
-- terminalidade da revogação;
-- expiração server-side de sessão e rejeição de replay após expiração;
-- armazenamento do segredo de dispositivo somente como hash;
-- concorrência real do limite `max_devices` em SQLite, verificando que apenas um registro vence quando oito tentativas simultâneas competem por uma licença com um único slot.
-
-A atomicidade completa de **licença + evento de auditoria** ainda é um requisito de hardening: o serviço atual persiste os dois em operações separadas. Não considerar essa parte concluída até que exista transação única com teste de rollback.
+Foi adicionada `backend/tests/test_license_atomicity.py` para verificar que uma transição não permanece aplicada quando o registro de auditoria falha e que uma transição normal gera estado + histórico juntos.
 
 ### Próxima subfase do licenciamento
 
-1. Concluir atomicidade transacional licença + auditoria e testar rollback/conflitos concorrentes.
-2. Completar testes de abuso dos endpoints administrativos, isolamento entre contas e não vazamento de dados sensíveis.
-3. Integração Android do binding com o fluxo real de login/licença.
-4. PIX de produção com provedor e webhook autenticado.
-5. Backup/restauração do licenciamento com teste real de restore.
+1. Observar CI e corrigir qualquer regressão introduzida pela camada transacional.
+2. Completar testes concorrentes específicos de ativação/renovação/revogação e impedir lost updates.
+3. Completar testes de abuso dos endpoints administrativos, isolamento entre contas e não vazamento de dados sensíveis.
+4. Revisar rate limiting, sessões/tokens e limites administrativos.
+5. Integrar binding no Android no fluxo real de login/licença.
+6. PIX de produção com provedor e webhook autenticado.
+7. Backup/restauração do licenciamento com teste real de restore.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
