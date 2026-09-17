@@ -30,40 +30,48 @@ Fluxo-alvo:
 - Testes remotos, Android de campo, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**STATUS: EM ANDAMENTO — NÚCLEO COMERCIAL INICIAL IMPLEMENTADO; ADMINISTRAÇÃO E INTEGRAÇÃO AINDA PENDENTES**
+**STATUS: EM ANDAMENTO — PERSISTÊNCIA COMERCIAL COMPATÍVEL CONCLUÍDA; SERVIÇO/ADMIN/DISPOSITIVOS AINDA PENDENTES**
 
 Auditoria realizada antes da alteração:
 
 - O projeto já possuía `License`, `Entitlements`, autenticação/sessões, SQLite, autorização server-side, `/licenses/me` e PIX sandbox.
 - Não possuía máquina de estados comercial completa, chave comercial separada, histórico de eventos, RBAC administrativo, dispositivos/binding, painel administrativo ou auditoria comercial completa.
 
-Milestone implementado no GitHub:
+Milestones implementados no GitHub:
 
 - `LicenseStatus` formalizado: `GERADA`, `DISPONIVEL`, `ATIVA`, `EXPIRADA`, `SUSPENSA`, `REVOGADA`.
-- `license_id` permanece identificador interno e `license_key` passa a representar a credencial comercial de alta entropia.
-- `License` ganhou campos de plano, ativação, renovação e último acesso, preservando compatibilidade dos construtores existentes.
-- `Entitlements` passou a validar limites positivos.
-- `LicenseEvent` e repositório em memória foram adicionados como base de histórico imutável.
-- `AccountRole` (`USER`/`ADMIN`) foi introduzido como fundação para RBAC administrativo.
-- Testes unitários novos cobrem geração de chave, estados, expiração por hora do servidor, suspensão, revogação e limites.
+- `license_id` permanece identificador interno e `license_key` representa a credencial comercial de alta entropia.
+- `License` possui plano, ativação, renovação e último acesso, preservando compatibilidade dos construtores existentes.
+- `Entitlements` valida limites positivos.
+- `LicenseEvent` fornece base de histórico imutável.
+- `AccountRole` (`USER`/`ADMIN`) fornece fundação para RBAC administrativo.
+- SQLite agora persiste role, chave, estado, plano, ativação, renovação e último acesso.
+- Foi criada tabela persistente `license_events` com índice temporal por licença.
+- Foi criada unicidade de banco para `license_key`.
+- Migração é aditiva: bancos legados recebem colunas ausentes e chaves retrocompatíveis antes do índice único, sem apagar dados existentes.
+- Liquidação PIX sandbox continua vinculada à licença e agora atualiza estado/renovação persistidos.
+- Testes adicionados para role, campos comerciais, unicidade, histórico durável e migração de banco legado.
 
-Commits do milestone:
+Commits do núcleo comercial e persistência:
 
 - `3058a0fd50d70901d82cd02e82900673db944856` — núcleo do ciclo comercial.
 - `6b1a2f4c6db0fc15904c4835bbce234dbbbcdeab` — roles de conta.
 - `0f2fe7331f91015068f04269517b443f8e3f6ad8` — testes do núcleo.
+- `671c2592cef433422584296756c0e5b604ae000f` — documentação do milestone inicial.
+- `c7b538b0efdd95f6b6bc931fc7aef44c7db3a438` — handoff do milestone inicial.
+- `a351e8eb343293a40c6a00d2c3999eff8bd6b14c` — persistência comercial/migração.
+- `9cbf64e30ceb3fc0afb44fe1fe5763c14458a138` — testes de migração/persistência.
 
 ### Próxima subfase do licenciamento
 
-1. Persistir os novos campos de licença/role sem quebrar bancos existentes.
-2. Criar dispositivos e enforcement de `max_devices`.
-3. Implementar serviço transacional de geração, ativação, renovação, suspensão, reativação e revogação com eventos de auditoria.
-4. Expor endpoints administrativos protegidos por role.
-5. Construir painel administrativo.
-6. Integrar histórico, filtros, dashboard e auditoria.
-7. Ampliar testes adversariais, concorrência e manipulação.
-8. Evoluir PIX sandbox para arquitetura de produção com provedor real/webhook autenticado.
-9. Validar backup/restauração do licenciamento.
+1. **Próxima etapa imediata:** dispositivos, vínculo de licença e enforcement real de `max_devices`.
+2. Serviço transacional de geração, ativação, renovação, suspensão, reativação e revogação com eventos de auditoria.
+3. Endpoints administrativos protegidos por `AccountRole.ADMIN`.
+4. Painel administrativo.
+5. Histórico, filtros, dashboard e auditoria operacional.
+6. Testes adversariais, concorrência e manipulação.
+7. PIX sandbox → arquitetura de produção com provedor real/webhook autenticado.
+8. Backup/restauração do licenciamento.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA**
