@@ -1,10 +1,21 @@
-"""Licensing domain and authorization primitives for Otimizer."""
+"""Licensing domain, lifecycle and authorization primitives for Otimizer."""
 
 from __future__ import annotations
 
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
+from enum import StrEnum
+from secrets import token_urlsafe
 from typing import Protocol
+
+
+class LicenseStatus(StrEnum):
+    GENERATED = "GERADA"
+    AVAILABLE = "DISPONIVEL"
+    ACTIVE = "ATIVA"
+    EXPIRED = "EXPIRADA"
+    SUSPENDED = "SUSPENSA"
+    REVOKED = "REVOGADA"
 
 
 @dataclass(frozen=True)
@@ -15,10 +26,21 @@ class Entitlements:
     max_devices: int = 1
     max_routes_per_day: int | None = None
 
+    def __post_init__(self) -> None:
+        if self.max_devices < 1:
+            raise ValueError("max_devices must be at least 1")
+        if self.max_routes_per_day is not None and self.max_routes_per_day < 1:
+            raise ValueError("max_routes_per_day must be positive when configured")
+
 
 @dataclass(frozen=True)
 class License:
-    """A server-owned license record with its configured price."""
+    """Server-owned commercial license record.
+
+    ``license_id`` is an internal identifier. ``license_key`` is the
+    unpredictable customer-facing activation credential and is never used as
+    the database primary key.
+    """
 
     license_id: str
     account_id: str
@@ -27,10 +49,27 @@ class License:
     entitlements: Entitlements = field(default_factory=Entitlements)
     revoked_at: datetime | None = None
     price_cents: int = 0
+    license_key: str = field(default_factory=lambda: generate_license_key())
+    status: LicenseStatus = LicenseStatus.ACTIVE
+    activated_at: datetime | None = None
+    last_renewal_at: datetime | None = None
+    renewal_count: int = 0
+    last_access_at: datetime | None = None
+    plan: str = "default"
 
     def __post_init__(self) -> None:
+        if not self.license_id.strip():
+            raise ValueError("license_id must not be empty")
+        if not self.account_id.strip():
+            raise ValueError("account_id must not be empty")
+        if not self.license_key.strip():
+            raise ValueError("license_key must not be empty")
         if self.price_cents < 0:
             raise ValueError("price_cents must be non-negative")
+        if self.renewal_count < 0:
+            raise ValueError("renewal_count must be non-negative")
+        if self.status == LicenseStatus.REVOKED and self.revoked_at is None:
+            raise ValueError("revoked licenses require revoked_at")
 
     def change_price(self, price_cents: int) -> "License":
         """Return this license with a new configured price without mutation."""
@@ -40,21 +79,48 @@ class License:
 
     def is_active(self, now: datetime | None = None) -> bool:
         current = _utc(now)
-        return self.revoked_at is None and self.starts_at <= current < self.expires_at
+        return (
+            self.status == LicenseStatus.ACTIVE
+            and self.revoked_at is None
+            and self.starts_at <= current < self.expires_at
+        )
+
+    def effective_status(self, now: datetime | None = None) -> LicenseStatus:
+        """Return the operational state using backend/server time."""
+        current = _utc(now)
+        if self.status == LicenseStatus.REVOKED or self.revoked_at is not None:
+            return LicenseStatus.REVOKED
+        if self.status == LicenseStatus.SUSPENDED:
+            return LicenseStatus.SUSPENDED
+        if current >= self.expires_at:
+            return LicenseStatus.EXPIRED
+        return self.status
 
 
 @dataclass(frozen=True)
-class LicenseDecision:
-    allowed: bool
-    code: str
-    message: str
-    license: License | None = None
+class LicenseEvent:
+    """Immutable audit event for a license lifecycle transition/action."""
+
+    event_id: str
+    license_id: str
+    action: str
+    occurred_at: datetime
+    actor_account_id: str | None = None
+    previous_status: LicenseStatus | None = None
+    new_status: LicenseStatus | None = None
+    reason: str | None = None
+    metadata_json: str | None = None
 
 
 class LicenseRepository(Protocol):
     def get_active_license(self, account_id: str, now: datetime) -> License | None: ...
     def get_by_id(self, license_id: str) -> License | None: ...
     def save(self, license_record: License) -> None: ...
+
+
+class LicenseEventRepository(Protocol):
+    def append(self, event: LicenseEvent) -> None: ...
+    def list_for_license(self, license_id: str) -> list[LicenseEvent]: ...
 
 
 class InMemoryLicenseRepository:
@@ -76,6 +142,54 @@ class InMemoryLicenseRepository:
             if license_record.account_id == account_id and license_record.is_active(now)
         )
         return max(matches, key=lambda item: item.expires_at, default=None)
+
+
+class InMemoryLicenseEventRepository:
+    def __init__(self, events: list[LicenseEvent] | None = None) -> None:
+        self._events = list(events or [])
+
+    def append(self, event: LicenseEvent) -> None:
+        self._events.append(event)
+
+    def list_for_license(self, license_id: str) -> list[LicenseEvent]:
+        return [event for event in self._events if event.license_id == license_id]
+
+
+def generate_license_key() -> str:
+    """Generate a high-entropy customer-facing license key."""
+    return token_urlsafe(32)
+
+
+def create_license_event(
+    license_id: str,
+    action: str,
+    occurred_at: datetime,
+    *,
+    actor_account_id: str | None = None,
+    previous_status: LicenseStatus | None = None,
+    new_status: LicenseStatus | None = None,
+    reason: str | None = None,
+    metadata_json: str | None = None,
+) -> LicenseEvent:
+    return LicenseEvent(
+        event_id=token_urlsafe(18),
+        license_id=license_id,
+        action=action,
+        occurred_at=_utc(occurred_at),
+        actor_account_id=actor_account_id,
+        previous_status=previous_status,
+        new_status=new_status,
+        reason=reason,
+        metadata_json=metadata_json,
+    )
+
+
+@dataclass(frozen=True)
+class LicenseDecision:
+    allowed: bool
+    code: str
+    message: str
+    license: License | None = None
 
 
 class LicenseAuthorizer:
