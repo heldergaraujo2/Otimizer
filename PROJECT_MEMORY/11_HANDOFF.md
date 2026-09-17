@@ -18,6 +18,7 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - migração aditiva SQLite e unicidade da chave;
 - binding persistente, hash de segredo e enforcement server-side de `max_devices`;
 - mesmo dispositivo pode ser reutilizado sem consumir outro slot;
+- dispositivo revogado não pode ser religado com o mesmo segredo;
 - serviço de ciclo de vida com relógio do servidor;
 - API administrativa protegida por `AccountRole.ADMIN`;
 - geração, consulta/filtros, detalhes, ativação, renovação, suspensão, reativação, revogação;
@@ -25,6 +26,19 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 - painel administrativo web dedicado;
 - navegação para o painel no app principal somente para `ADMIN`;
 - CI frontend inclui sintaxe e testes do painel.
+
+## Integração de binding no cliente
+
+- `POST /devices/bind` exige sessão autenticada e licença pertencente à conta;
+- Android gera segredo aleatório por instalação;
+- segredo Android é cifrado com chave AES armazenada no Android Keystore e não é exposto ao JavaScript nem ao backend em armazenamento persistente;
+- resposta de binding expõe somente `device_id` e estado, nunca o segredo/hash;
+- frontend Android bloqueia otimização até o binding ser confirmado;
+- navegador possui fallback com segredo aleatório persistido no armazenamento local;
+- `/optimize` e `/optimize-manual` aceitam `X-Otimizer-Device-ID`;
+- a aplicação global instancia `SQLiteDeviceRepository` e valida no servidor conta, dispositivo ativo e licença ativa antes de processar a rota;
+- revogação de dispositivo passa a impedir uso posterior mesmo com licença ativa;
+- testes específicos cobrem endpoint de binding e autorização da rota.
 
 ## Segurança, atomicidade e concorrência — estado atual
 
@@ -50,16 +64,20 @@ O núcleo funcional de importação, localização, PhysicalStop, OSRM, otimiza�
 
 ## Validação CI
 
-O ajuste do fixture adversarial foi enviado no SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b`. O workflow Backend tests desse SHA concluiu `success`, assim como o workflow Frontend tests correspondente. Esta é a evidência atual de que a regressão observada foi corrigida.
+O SHA `087f1cc5615b5898bc027a6ba61b8138a734c86b` teve Backend tests e Frontend tests verdes após a correção do fixture adversarial.
 
-A suíte local continua não disponível neste ambiente porque o checkout não é montado aqui; a validação definitiva deste ciclo foi feita pelo GitHub Actions.
+Durante a implementação do binding, o Backend tests do SHA `4af5d80d45a5547f72225c78d88ac5698a24b298` encontrou quatro falhas reais: três causadas por um binding SQL incompleto no novo insert de dispositivo e uma por mapeamento HTTP do estado `DEVICE_REVOKED`. Essas falhas foram corrigidas em `dcfcb2a4dc401dbaca38736adfbe0f686d950d29` e `a620a2399ff6e3b19be2db5d2043acee61e60031`.
+
+O Frontend tests do SHA `a620a2399ff6e3b19be2db5d2043acee61e60031` já concluiu `success`. O Backend tests desse mesmo SHA estava em execução no último checkpoint deste handoff; portanto, não declarar o ciclo verde até a conclusão observável.
+
+A suíte local continua não disponível neste ambiente porque o checkout não é montado aqui; a validação definitiva deste ciclo deve usar o GitHub Actions.
 
 ## Próxima etapa obrigatória
 
-1. Fechar a integração de binding de dispositivo no Android: gerar/armazenar segredo por instalação com Android Keystore, autenticar no backend e vincular ao limite da licença.
-2. Fazer o fluxo de uso depender da autorização do dispositivo, sem confiar somente na licença da conta.
-3. Testar instalação/reinstalação, segundo dispositivo, limite, revogação e sessão expirada.
-4. Depois, implementar PIX de produção com provedor e webhook autenticado.
+1. Confirmar conclusão do Backend tests do SHA final e corrigir qualquer regressão restante.
+2. Fazer teste físico Android de login → licença → binding → otimização e revogação/limite.
+3. Testar reinstalação/restore, segundo dispositivo e sessão expirada.
+4. Implementar PIX de produção com provedor e webhook autenticado.
 5. Implementar backup/restauração do licenciamento e executar teste real de restore.
 6. Avançar para VPS, HTTPS, OSRM e DB de produção.
 
