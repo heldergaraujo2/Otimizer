@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timedelta, timezone
 from enum import StrEnum
@@ -122,6 +123,7 @@ class LicenseAuthorizer:
         return LicenseDecision(True, "AUTHORIZED", "Route optimization authorized.", license_record)
 
 class LicenseLifecycleError(ValueError): pass
+class LicenseConcurrencyError(LicenseLifecycleError): pass
 
 class LicenseLifecycleService:
     """Authoritative server-side state machine; durable repositories may commit state+audit atomically."""
@@ -134,7 +136,8 @@ class LicenseLifecycleService:
         record = self._get(license_id); status = record.effective_status(current)
         if status in {LicenseStatus.REVOKED, LicenseStatus.SUSPENDED}: raise LicenseLifecycleError(f"license cannot be renewed while {status.value}")
         updated = replace(record, expires_at=max(record.expires_at, current) + duration, status=LicenseStatus.ACTIVE, last_renewal_at=current, renewal_count=record.renewal_count + 1)
-        event = create_license_event(license_id, "RENEWED", current, actor_account_id=actor_account_id, previous_status=record.status, new_status=updated.status, metadata_json=f'{{"duration_seconds":{int(duration.total_seconds())}}}')
+        metadata = json.dumps({"duration_seconds": int(duration.total_seconds()), "expected_renewal_count": record.renewal_count, "expected_expires_at": record.expires_at.isoformat()}, separators=(",", ":"))
+        event = create_license_event(license_id, "RENEWED", current, actor_account_id=actor_account_id, previous_status=record.status, new_status=updated.status, metadata_json=metadata)
         self._commit(updated, event); return updated
     def suspend(self, license_id: str, actor_account_id: str, reason: str, now: datetime | None = None) -> License:
         if not reason.strip(): raise LicenseLifecycleError("suspension reason is required")
@@ -165,9 +168,12 @@ class LicenseLifecycleService:
         self._commit(updated, create_license_event(license_id, action, current, actor_account_id=actor_account_id, previous_status=record.status, new_status=new_status, reason=reason)); return updated
     def _commit(self, license_record: License, event: LicenseEvent) -> None:
         atomic = getattr(self.repository, "save_with_event", None)
-        if callable(atomic): atomic(license_record, event)
-        else:
-            self.repository.save(license_record); self.events.append(event)
+        try:
+            if callable(atomic): atomic(license_record, event)
+            else:
+                self.repository.save(license_record); self.events.append(event)
+        except LicenseConcurrencyError:
+            raise
     def _get(self, license_id: str) -> License:
         record = self.repository.get_by_id(license_id)
         if record is None: raise LicenseLifecycleError("license not found")
