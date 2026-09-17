@@ -20,7 +20,7 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 CI/regressões, carga, falhas externas, segurança, deploy remoto, Android pela Internet, backup/restauração e monitoramento permanecem pendentes.
 
 ### Fase 11 — Sistema oficial de licenças
-**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web, atomicidade e proteção contra lost updates implementados; integração Android e produção ainda pendentes.**
+**EM ANDAMENTO — núcleo comercial, persistência, dispositivos, ciclo de vida, API administrativa protegida, painel web, atomicidade, concorrência e integração de binding cliente-servidor implementados; produção comercial ainda pendente.**
 
 Milestones implementados:
 
@@ -35,9 +35,15 @@ Milestones implementados:
 - hash do segredo da instalação;
 - enforcement server-side de `max_devices`;
 - reuso do mesmo dispositivo sem consumir slot;
-- revogação de dispositivo;
+- revogação permanente do binding;
+- segredo Android protegido por Android Keystore e persistido cifrado;
+- endpoint autenticado `/devices/bind` sem retorno do segredo/hash;
+- browser também possui identidade de instalação aleatória persistida localmente;
+- autorização server-side das rotas por `X-Otimizer-Device-ID` quando o app global usa o repositório de dispositivos;
+- rota manual também exige binding de dispositivo;
+- revogação do dispositivo bloqueia nova tentativa com o mesmo segredo;
 - serviço de ciclo de vida para ativação, renovação, suspensão, reativação, revogação e expiração;
-- transições inválidas bloqueadas e revogação permanente;
+- transições inválidas bloqueadas e revogação terminal;
 - expiração baseada no relógio do servidor;
 - auditoria de transições;
 - API administrativa protegida por `AccountRole.ADMIN`;
@@ -50,7 +56,7 @@ Milestones implementados:
 - respostas administrativas sem expor segredos de instalação;
 - `save_with_event()` em SQLite para persistir licença + auditoria em uma transação única;
 - rollback testado quando a inserção do evento falha;
-- proteção otimista contra estado obsoleto em transições concorrentes: status anterior é validado dentro da transação e renovações também validam contador + expiração esperados;
+- proteção otimista contra estado obsoleto em transições concorrentes;
 - testes concorrentes determinísticos para ativação, renovação e revogação;
 - revogação de dispositivo com auditoria atômica em SQLite.
 
@@ -62,15 +68,15 @@ A suíte `backend/tests/test_licensing_security_adversarial.py` cobre manipulaç
 
 `backend/tests/test_license_concurrency.py` força uma leitura concorrente do mesmo estado e verifica que somente uma operação vence, sem lost update e sem duplicação do evento de auditoria.
 
+`backend/tests/test_device_binding_api.py` e `backend/tests/test_device_authorization.py` cobrem autenticação, limite, reuso, revogação, isolamento e bloqueio server-side da rota sem binding válido.
+
 ### Próxima subfase do licenciamento
 
-1. Confirmar CI backend após o hardening e corrigir qualquer regressão.
-2. Fechar revisão de abuso administrativo, isolamento entre contas e vazamento de dados sensíveis.
-3. Revisar rate limiting, sessões/tokens e limites administrativos; rate limiting distribuído de produção deverá ficar no gateway/VPS quando o backend for implantado.
-4. Integrar binding no Android no fluxo real de login/licença.
-5. PIX de produção com provedor e webhook autenticado.
-6. Backup/restauração do licenciamento com teste real de restore.
-7. Depois disso, avançar para arquitetura/VPS/HTTPS/OSRM/DB de produção e testes completos pela Internet.
+1. Confirmar CI backend após o hardening de device binding e corrigir qualquer regressão real.
+2. Testar reinstalação/restore de dados, segundo dispositivo, limite, revogação e sessão expirada em ambiente Android físico.
+3. Implementar PIX de produção com provedor e webhook autenticado.
+4. Implementar backup/restauração do licenciamento e executar teste real de restore.
+5. Avançar para arquitetura/VPS/HTTPS/OSRM/DB de produção e testes completos pela Internet.
 
 ### Sistema de atualização por patch
 **PLANEJADO — NÃO IMPLEMENTAR AINDA.**
