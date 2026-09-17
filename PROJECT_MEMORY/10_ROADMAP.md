@@ -19,6 +19,25 @@ Importação, PhysicalStop, localização cadastral/fallback, OSRM, otimização
 
 CI/regressões, testes físicos completos do Android, falhas externas, backup/restauração, deploy remoto, Android pela Internet e monitoramento permanecem pendentes.
 
+**Backup/restore provider-neutral: IMPLEMENTAÇÃO TÉCNICA INICIADA.**
+
+Foi adicionado `backend/src/otimizer_api/backup.py`, integrado ao desenho atual de persistência SQLite, com:
+
+- snapshot usando a API nativa de backup do SQLite;
+- escrita atômica via arquivo temporário + replace;
+- manifest JSON versionado;
+- SHA-256 do snapshot;
+- validação de `PRAGMA integrity_check`;
+- validação das tabelas críticas `accounts`, `sessions`, `licenses`, `license_events` e `payments`;
+- conferência dos contadores registrados no manifest;
+- permissões locais `0600` para os artefatos criados;
+- restore validado para arquivo-alvo separado e substituição atômica somente após validação;
+- falha de validação não substitui um alvo existente.
+
+Foram adicionados testes em `backend/tests/test_backup.py` cobrindo round-trip, integridade, manifest ausente, adulteração, proteção do alvo e prevenção de backup sobre o próprio banco.
+
+**Importante:** isto ainda não é um sistema de backup de produção. Retenção, armazenamento externo/imutável, criptografia em repouso conforme o ambiente, agenda operacional, monitoramento, execução de restore real e prova de recuperação continuam pendentes.
+
 ### Fase 11 — Sistema oficial de licenças
 **EM ANDAMENTO — núcleo comercial e controles de segurança implementados; produção comercial ainda pendente.**
 
@@ -69,29 +88,24 @@ Milestones implementados:
 
 ## Verificação deste ciclo — 2026-09-17
 
-- HEAD auditado inicialmente: `081b974aca5a0855e08be565a300c1eb52442817`.
-- Esse commit é filho de `1b94079da362a3b71652aa35d3fa6a5fd63f30db` e contém a reconciliação do security audit com o binding Android já implementado.
-- Os workflows existentes na `main` são Backend tests, Frontend tests, Importer tests e Android APK.
-- Após o HEAD documental, o workflow `Frontend tests` executou no SHA `081b974aca5a0855e08be565a300c1eb52442817` e terminou `success` (run `35243638706`). As etapas de sintaxe JavaScript e testes frontend terminaram com sucesso.
-- Os outros workflows não têm execução correspondente observável para esse SHA nesta auditoria, pois seus gatilhos de push possuem filtros de caminho que não incluem a documentação alterada. Portanto, Backend/Importer/Android não são declarados verdes neste ciclo.
-- A suíte local não está disponível neste ambiente porque o checkout do repositório não é montado aqui.
-- A implementação Android contém geração/proteção do segredo por Keystore e configuração de API, mas os cenários físicos de homologação continuam dependendo de execução em dispositivo real.
-- Foi adicionada `docs/ANDROID_HOMOLOGATION.md` com a matriz oficial de homologação física do binding/licenciamento.
+- HEAD de continuidade anterior: `b346edc61c49dbf02d8dbae464d064e9e3c83239`.
+- Nesta etapa foram adicionados `backup.py` e `test_backup.py`; a sequência resultante ficou nos commits `719039bb48b54680bb9ad76b086ee2d441ab938c` e `4a5edf725ecbdc458aaf5e7b0d0d16ee002b0380`.
+- A persistência atual usa SQLite e contém as tabelas críticas cobertas pelo componente de backup.
+- O ambiente do agente não possui checkout local montado; portanto, os testes não foram executados localmente nesta etapa.
+- Não há execução de GitHub Actions observável para o commit `4a5edf725ecbdc458aaf5e7b0d0d16ee002b0380` e o combined status retornou vazio. Logo, a suíte Backend ainda não é declarada verde neste ciclo.
+- A implementação foi limitada ao domínio provider-neutral de backup/restore; não houve alteração no roteador, localização, otimização, Android, licenciamento ou integração Pix específica.
 
 ## Próximas etapas obrigatórias
 
-1. Executar fisicamente Android conforme `docs/ANDROID_HOMOLOGATION.md`: instalação, login, licença, binding e otimização.
-2. Revogar o dispositivo pelo painel e confirmar bloqueio da otimização.
-3. Validar segundo dispositivo, `max_devices` e reuso do mesmo dispositivo.
-4. Validar reinstalação/restore e comportamento do segredo/binding.
-5. Validar licença expirada/suspensa/revogada e sessão expirada/novo login/revalidação.
-6. Em paralelo, preparar tecnicamente backup/restore provider-neutral sem declarar restore real concluído.
-7. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
-8. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
-9. Executar restore real e validar integridade dos dados críticos.
-10. Preparar VPS, DB, OSRM, domínio e HTTPS.
-11. Testar Android pela Internet, monitoramento e usuários piloto.
-12. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
+1. Executar fisicamente Android conforme `docs/ANDROID_HOMOLOGATION.md`.
+2. Completar retenção, armazenamento externo seguro, agendamento e observabilidade de backups.
+3. Executar restore real em ambiente controlado e validar dados críticos + inicialização da aplicação.
+4. Definir política de sessões após restore; por segurança operacional, reautenticação/invalidação de sessões restauradas deve ser tratada explicitamente antes de produção.
+5. Selecionar/configurar PSP Pix real e implementar adaptador + endpoint autenticado/idempotente.
+6. Testar pagamento confirmado → liquidação → ativação/renovação da licença.
+7. Preparar VPS, DB, OSRM, domínio e HTTPS.
+8. Testar Android pela Internet, monitoramento e usuários piloto.
+9. Gerar APK Release assinado, testar instalação limpa e executar auditoria final.
 
 ## Dependências que não devem ser inventadas
 
