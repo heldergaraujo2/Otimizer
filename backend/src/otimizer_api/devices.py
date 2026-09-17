@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from hashlib import sha256
@@ -64,6 +65,60 @@ class InMemoryDeviceRepository:
         return updated
 
 
+class SQLiteDeviceRepository:
+    """Durable repository; the capacity check and insert happen in one transaction."""
+
+    def __init__(self, database) -> None:
+        self.database = database
+        with self.database.connect() as connection:
+            connection.execute("""CREATE TABLE IF NOT EXISTS devices (
+                device_id TEXT PRIMARY KEY,
+                account_id TEXT NOT NULL REFERENCES accounts(account_id),
+                license_id TEXT NOT NULL REFERENCES licenses(license_id),
+                device_key_hash TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                last_seen_at TEXT NOT NULL,
+                revoked_at TEXT
+            )""")
+            connection.execute("CREATE UNIQUE INDEX IF NOT EXISTS ux_devices_license_key ON devices(license_id, device_key_hash)")
+            connection.execute("CREATE INDEX IF NOT EXISTS idx_devices_license_active ON devices(license_id, revoked_at)")
+
+    def register(self, device: Device, max_devices: int) -> tuple[bool, Device | None, str]:
+        if max_devices < 1:
+            raise ValueError("max_devices must be at least 1")
+        with self.database.connect() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE license_id=? AND device_key_hash=?", (device.license_id, device.device_key_hash)).fetchone()
+            if row is not None and row["revoked_at"] is None:
+                connection.execute("UPDATE devices SET last_seen_at=? WHERE device_id=?", (_iso(device.last_seen_at), row["device_id"]))
+                return True, _device_from_row(row, last_seen_at=device.last_seen_at), "DEVICE_REUSED"
+            count = connection.execute("SELECT COUNT(*) FROM devices WHERE license_id=? AND revoked_at IS NULL", (device.license_id,)).fetchone()[0]
+            if count >= max_devices:
+                return False, None, "DEVICE_LIMIT_REACHED"
+            connection.execute("INSERT INTO devices(device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at) VALUES (?, ?, ?, ?, ?, ?, NULL)", (device.device_id, device.account_id, device.license_id, device.device_key_hash, _iso(device.created_at), _iso(device.last_seen_at)))
+            return True, device, "DEVICE_REGISTERED"
+
+    def get(self, device_id: str) -> Device | None:
+        with self.database.connect() as connection:
+            row = connection.execute("SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE device_id=?", (device_id,)).fetchone()
+        return _device_from_row(row)
+
+    def list_for_license(self, license_id: str, active_only: bool = True) -> list[Device]:
+        query = "SELECT device_id, account_id, license_id, device_key_hash, created_at, last_seen_at, revoked_at FROM devices WHERE license_id=?"
+        params = [license_id]
+        if active_only:
+            query += " AND revoked_at IS NULL"
+        query += " ORDER BY created_at ASC, device_id ASC"
+        with self.database.connect() as connection:
+            rows = connection.execute(query, params).fetchall()
+        return [_device_from_row(row) for row in rows]
+
+    def revoke(self, device_id: str, revoked_at: datetime) -> Device | None:
+        with self.database.connect() as connection:
+            connection.execute("UPDATE devices SET revoked_at=? WHERE device_id=? AND revoked_at IS NULL", (_iso(revoked_at), device_id))
+        return self.get(device_id)
+
+
 class DeviceBindingService:
     """Binds installations to an active license; the backend is authoritative."""
 
@@ -81,12 +136,10 @@ class DeviceBindingService:
             return False, None, "LICENSE_NOT_FOUND"
         if not license_record.is_active(current):
             return False, None, _license_error(license_record, current)
-        device_key_hash = hash_device_secret(device_secret)
-        device = Device(token_urlsafe(18), account_id, license_id, device_key_hash, current, current)
+        device = Device(token_urlsafe(18), account_id, license_id, hash_device_secret(device_secret), current, current)
         allowed, bound, code = self.devices.register(device, license_record.entitlements.max_devices)
         if self.events is not None:
-            event = create_license_event(license_id, code, current, actor_account_id=account_id, new_status=license_record.status, metadata_json='{"device_binding":true}')
-            self.events.append(event)
+            self.events.append(create_license_event(license_id, code, current, actor_account_id=account_id, new_status=license_record.status, metadata_json='{"device_binding":true}'))
         return allowed, bound, code
 
     def revoke(self, account_id: str, device_id: str, now: datetime | None = None) -> bool:
@@ -110,11 +163,21 @@ def hash_device_secret(device_secret: str) -> str:
 
 def _license_error(license_record: License, now: datetime) -> str:
     status = license_record.effective_status(now)
-    return {
-        LicenseStatus.EXPIRED: "LICENSE_EXPIRED",
-        LicenseStatus.SUSPENDED: "LICENSE_SUSPENDED",
-        LicenseStatus.REVOKED: "LICENSE_REVOKED",
-    }.get(status, "LICENSE_NOT_ACTIVE")
+    return {LicenseStatus.EXPIRED: "LICENSE_EXPIRED", LicenseStatus.SUSPENDED: "LICENSE_SUSPENDED", LicenseStatus.REVOKED: "LICENSE_REVOKED"}.get(status, "LICENSE_NOT_ACTIVE")
+
+
+def _device_from_row(row: sqlite3.Row | None, last_seen_at: datetime | None = None) -> Device | None:
+    if row is None:
+        return None
+    return Device(row["device_id"], row["account_id"], row["license_id"], row["device_key_hash"], _parse(row["created_at"]), last_seen_at or _parse(row["last_seen_at"]), _parse(row["revoked_at"]) if row["revoked_at"] else None)
+
+
+def _iso(value: datetime) -> str:
+    return _utc(value).isoformat()
+
+
+def _parse(value: str) -> datetime:
+    return _utc(datetime.fromisoformat(value))
 
 
 def _utc(value: datetime | None) -> datetime:
