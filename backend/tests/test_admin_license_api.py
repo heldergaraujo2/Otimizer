@@ -31,8 +31,18 @@ def _setup():
 def test_admin_endpoints_require_authentication_and_admin_role():
     client, admin_token, user_token, *_ = _setup()
     assert client.get("/admin/licenses").status_code == 401
+    assert client.get("/admin/licenses", headers={"Authorization": "Bearer malformed-token"}).status_code == 401
     assert client.get("/admin/licenses", headers={"Authorization": f"Bearer {user_token}"}).status_code == 403
     assert client.get("/admin/licenses", headers={"Authorization": f"Bearer {admin_token}"}).status_code == 200
+
+
+def test_admin_generation_rejects_unknown_account_and_invalid_payload():
+    client, admin_token, *_ = _setup()
+    headers = {"Authorization": f"Bearer {admin_token}"}
+    missing = client.post("/admin/licenses", headers=headers, json={"account_id": "does-not-exist", "duration_days": 30})
+    assert missing.status_code == 404
+    invalid = client.post("/admin/licenses", headers=headers, json={"account_id": "user", "duration_days": 0})
+    assert invalid.status_code == 422
 
 
 def test_admin_can_generate_query_and_read_history_without_secret_leak():
@@ -84,3 +94,17 @@ def test_admin_device_listing_and_revocation_never_exposes_secret_hash():
     revoked = client.post("/admin/devices/dev-1/revoke", headers=headers)
     assert revoked.status_code == 200
     assert revoked.json()["active"] is False
+
+
+def test_admin_history_and_device_endpoints_do_not_leak_data_to_regular_users():
+    client, admin_token, user_token, user, licenses, _, devices, now = _setup()
+    admin_headers = {"Authorization": f"Bearer {admin_token}"}
+    user_headers = {"Authorization": f"Bearer {user_token}"}
+    record = License("lic-isolation", user.account_id, now, now + timedelta(days=30), license_key="safe-key")
+    licenses.save(record)
+    devices.register(Device("dev-isolation", user.account_id, record.license_id, "hash-only", now, now), 1)
+    assert client.get(f"/admin/licenses/{record.license_id}", headers=user_headers).status_code == 403
+    assert client.get(f"/admin/licenses/{record.license_id}/history", headers=user_headers).status_code == 403
+    assert client.get(f"/admin/licenses/{record.license_id}/devices", headers=user_headers).status_code == 403
+    assert client.post("/admin/devices/dev-isolation/revoke", headers=user_headers).status_code == 403
+    assert client.get(f"/admin/licenses/{record.license_id}", headers=admin_headers).status_code == 200
