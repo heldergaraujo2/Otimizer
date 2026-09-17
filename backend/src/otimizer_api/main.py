@@ -17,6 +17,7 @@ from otimizer_importer.location import LocationDataProvider
 from otimizer_importer.optimization import OptimizationError
 from otimizer_importer.routing import RoutingError, RoutingProvider
 from otimizer_api.auth import AuthenticationService
+from otimizer_api.devices import DeviceRepository, SQLiteDeviceRepository
 from otimizer_api.licensing import LicenseAuthorizer
 from otimizer_api.payments import PaymentService
 
@@ -94,15 +95,15 @@ def _manual_workbook(payload):
         sheet.append([f"MANUAL-{index:04d}",str(index),str(index),f"MANUAL-{index:04d}",address or None,(stop.neighborhood or "").strip() or None,(stop.city or "Goiânia").strip() or "Goiânia",(stop.zipcode or "").strip() or None,stop.latitude,stop.longitude,(stop.quadra or "").strip() or None,(stop.lote or "").strip() or None])
     return workbook
 
-def create_app(routing_provider=None, license_authorizer=None, auth_service=None, payment_service=None, location_provider=None):
+def create_app(routing_provider=None, license_authorizer=None, auth_service=None, payment_service=None, location_provider=None, device_repository: DeviceRepository | None = None):
     api = FastAPI(title="Otimizer API", version="0.1.0")
-    api.add_middleware(CORSMiddleware, allow_origins=_cors_origins(), allow_credentials=False, allow_methods=["GET","POST"], allow_headers=["Content-Type","Authorization","X-Otimizer-Account-ID"])
+    api.add_middleware(CORSMiddleware, allow_origins=_cors_origins(), allow_credentials=False, allow_methods=["GET","POST"], allow_headers=["Content-Type","Authorization","X-Otimizer-Account-ID","X-Otimizer-Device-ID"])
     def authenticated_account(authorization):
         if auth_service is None: raise HTTPException(status_code=503, detail="Authentication is not configured")
         authenticated = auth_service.authenticate_bearer(authorization)
         if authenticated is None: raise HTTPException(status_code=401, detail="Authentication is required")
         return authenticated.account
-    def authorize_route(authorization, account_id):
+    def authorize_route(authorization, account_id, device_id):
         if auth_service is not None:
             authenticated = auth_service.authenticate_bearer(authorization)
             if authenticated is None: raise HTTPException(status_code=401, detail="Authentication is required")
@@ -111,6 +112,13 @@ def create_app(routing_provider=None, license_authorizer=None, auth_service=None
             if not account_id or not account_id.strip(): raise HTTPException(status_code=401, detail="Authentication is required")
             decision = license_authorizer.authorize_route(account_id.strip())
             if not decision.allowed: raise HTTPException(status_code=403, detail={"code":decision.code,"message":decision.message})
+        if device_repository is not None:
+            if not device_id or not device_id.strip(): raise HTTPException(status_code=403, detail={"code":"DEVICE_BINDING_REQUIRED","message":"An authorized device binding is required"})
+            device = device_repository.get(device_id.strip())
+            if device is None or not device.active or device.account_id != account_id: raise HTTPException(status_code=403, detail={"code":"DEVICE_NOT_AUTHORIZED","message":"The device is not authorized for this account"})
+            if license_authorizer is not None:
+                active_license = license_authorizer.repository.get_active_license(account_id.strip(), datetime.now(timezone.utc))
+                if active_license is None or device.license_id != active_license.license_id: raise HTTPException(status_code=403, detail={"code":"DEVICE_NOT_AUTHORIZED","message":"The device is not authorized for the active license"})
         return account_id
     @api.get("/health")
     def health(): return {"status":"ok"}
@@ -154,8 +162,8 @@ def create_app(routing_provider=None, license_authorizer=None, auth_service=None
         if charge is None or charge.account_id != account.account_id: raise HTTPException(status_code=404, detail="Payment not found")
         return _serialize_charge(charge)
     @api.post("/optimize")
-    async def optimize_route(file: Annotated[UploadFile, File(...)], objective: Annotated[OptimizationObjective, Form()] = OptimizationObjective.TIME, origin_latitude: Annotated[float | None, Form()] = None, origin_longitude: Annotated[float | None, Form()] = None, destination_latitude: Annotated[float | None, Form()] = None, destination_longitude: Annotated[float | None, Form()] = None, return_to_start: Annotated[bool, Form()] = False, manual_locations: Annotated[str | None, Form()] = None, authorization: Annotated[str | None, Header()] = None, account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None):
-        account_id = authorize_route(authorization, account_id)
+    async def optimize_route(file: Annotated[UploadFile, File(...)], objective: Annotated[OptimizationObjective, Form()] = OptimizationObjective.TIME, origin_latitude: Annotated[float | None, Form()] = None, origin_longitude: Annotated[float | None, Form()] = None, destination_latitude: Annotated[float | None, Form()] = None, destination_longitude: Annotated[float | None, Form()] = None, return_to_start: Annotated[bool, Form()] = False, manual_locations: Annotated[str | None, Form()] = None, authorization: Annotated[str | None, Header()] = None, account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None, device_id: Annotated[str | None, Header(alias="X-Otimizer-Device-ID")] = None):
+        account_id = authorize_route(authorization, account_id, device_id)
         if not file.filename or Path(file.filename).suffix.lower() != ".xlsx": raise HTTPException(status_code=422, detail="The uploaded file must be an .xlsx workbook")
         origin = _endpoint(origin_latitude, origin_longitude, "origin"); destination = _endpoint(destination_latitude, destination_longitude, "destination")
         if destination is not None and return_to_start: raise HTTPException(status_code=422, detail="destination and return_to_start cannot be combined")
@@ -169,8 +177,8 @@ def create_app(routing_provider=None, license_authorizer=None, auth_service=None
         finally: temporary_path.unlink(missing_ok=True)
         return _serialize(result)
     @api.post("/optimize-manual")
-    def optimize_manual_route(payload: ManualRouteRequest, authorization: Annotated[str | None, Header()] = None, account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None):
-        authorize_route(authorization, account_id)
+    def optimize_manual_route(payload: ManualRouteRequest, authorization: Annotated[str | None, Header()] = None, account_id: Annotated[str | None, Header(alias="X-Otimizer-Account-ID")] = None, device_id: Annotated[str | None, Header(alias="X-Otimizer-Device-ID")] = None):
+        authorize_route(authorization, account_id, device_id)
         if not payload.stops: raise HTTPException(status_code=422, detail="Add at least one stop to the manual route")
         if len(payload.stops) > 500: raise HTTPException(status_code=422, detail="A manual route cannot contain more than 500 stops")
         workbook = _manual_workbook(payload)
@@ -183,7 +191,7 @@ def create_app(routing_provider=None, license_authorizer=None, auth_service=None
         return _serialize(result)
     return api
 
-from otimizer_api.persistence import SQLitePaymentRepository, build_sqlite_services
+from otimizer_api.persistence import SQLitePaymentRepository, build_sqlite_services, SQLiteLicenseEventRepository
 from otimizer_api.payments import SandboxPixGateway
 from otimizer_importer.goiania import GoianiaLocationProvider
 
@@ -195,12 +203,10 @@ _payment_repository = SQLitePaymentRepository(_database)
 _payment_gateway = SandboxPixGateway(_payment_repository)
 _payment_service = PaymentService(_payment_repository, _payment_gateway, _license_authorizer.repository)
 _location_provider = GoianiaLocationProvider()
-app = create_app(auth_service=_auth_service, license_authorizer=_license_authorizer, payment_service=_payment_service, location_provider=_location_provider)
+_device_repository = SQLiteDeviceRepository(_database)
+app = create_app(auth_service=_auth_service, license_authorizer=_license_authorizer, payment_service=_payment_service, location_provider=_location_provider, device_repository=_device_repository)
 from otimizer_api.admin_api import register_admin_routes
-from otimizer_api.devices import SQLiteDeviceRepository
 from otimizer_api.licensing import LicenseLifecycleService
-from otimizer_api.persistence import SQLiteLicenseEventRepository
 _license_events = SQLiteLicenseEventRepository(_database)
 _license_lifecycle = LicenseLifecycleService(_license_authorizer.repository, _license_events)
-_device_repository = SQLiteDeviceRepository(_database)
 register_admin_routes(app, auth_service=_auth_service, licenses=_license_authorizer.repository, events=_license_events, lifecycle=_license_lifecycle, devices=_device_repository)
