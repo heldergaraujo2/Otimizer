@@ -29,16 +29,15 @@ REAL_EXPORTS = (
 
 @pytest.mark.parametrize("path,delivery_count", REAL_EXPORTS)
 def test_real_xlsx_exports_preserve_delivery_accounting(path: Path, delivery_count: int):
-    """Real exports are regression fixtures for accounting, not fixed stop counts.
+    """Real exports are optional local regression fixtures for accounting.
 
-    Physical-stop counts are data-dependent and must not be treated as product
-    constants. The invariant is that every eligible delivery appears exactly
-    once in one non-empty physical stop.
-
-    The fixtures intentionally retain their original filenames so future
-    regressions can be compared against the same operational exports.
+    These workbooks contain real addresses and tracking identifiers, so they
+    are intentionally not versioned. When present locally, they validate that
+    every eligible delivery appears exactly once in one non-empty physical stop;
+    stop counts remain data-dependent and are not product constants.
     """
-    assert path.exists(), f"Regression XLSX fixture not found: {path}"
+    if not path.exists():
+        pytest.skip(f"Local regression XLSX fixture not available: {path.name}")
 
     result = import_result(path)
     stops = group_physical_stops(list(result.deliveries))

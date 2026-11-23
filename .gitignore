@@ -3,25 +3,63 @@ __pycache__/
 *.py[cod]
 *.egg-info/
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
 .venv/
 venv/
+.coverage
+coverage.xml
+htmlcov/
+build/
+dist/
+
+# Node
+node_modules/
+coverage/
+.nyc_output/
+npm-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Android / Gradle build outputs and signing material
+.gradle/
+android/.gradle/
+android/local.properties
+android/captures/
+android/app/src/main/assets/
+*.apk
+*.aab
+*.jks
+*.keystore
+*.p12
+*.pfx
 
 # Local delivery data — may contain addresses and tracking IDs
 *.xlsx
 *.xls
 *.csv
 *.parquet
+resultado*.json
+*.db
+*.sqlite
+*.sqlite3
 
-# Temporary probes / local scratch files
+# Temporary probes / local scratch files and logs
 _tmp_*
+*.log
+*.tmp
 
 # Environment / secrets
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+secrets/
 
 # IDE / OS
 .vscode/
 .idea/
 .DS_Store
 Thumbs.db
+desktop.ini
